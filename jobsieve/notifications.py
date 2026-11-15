@@ -1,0 +1,104 @@
+import logging
+import os
+import smtplib
+import requests
+from email.mime.text import MIMEText
+from datetime import datetime, timezone
+
+logger = logging.getLogger("jobsieve.notifications")
+
+NOTIFICATION_WEBHOOK = os.environ.get("NOTIFICATION_WEBHOOK", "")
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT") or "587")
+EMAIL_USER = os.environ.get("EMAIL_USER", "")
+EMAIL_PASS = os.environ.get("EMAIL_PASS", "")
+EMAIL_TO = os.environ.get("EMAIL_TO", "")
+MIN_SCORE_NOTIFY = int(os.environ.get("MIN_SCORE_NOTIFY") or "7")
+
+def last_check_path():
+    return os.path.join(os.environ.get("DATA_DIR", "./data"), "last_check.txt")
+
+
+def get_last_check():
+    try:
+        with open(last_check_path(), "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return "1970-01-01T00:00:00"
+
+
+def set_last_check(ts: str):
+    path = last_check_path()
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(ts)
+
+
+def send_webhook(jobs: list):
+    if not NOTIFICATION_WEBHOOK:
+        return False
+    payload = {
+        "text": f"Found {len(jobs)} new matching jobs!",
+        "jobs": [
+            {"title": j["title"], "score": j["score"], "link": j["link"]}
+            for j in jobs[:5]
+        ],
+    }
+    try:
+        response = requests.post(
+            NOTIFICATION_WEBHOOK,
+            json=payload,
+            timeout=15,
+            headers={"Content-Type": "application/json"},
+        )
+        response.raise_for_status()
+        return True
+    except Exception as error:
+        logger.warning("webhook notification failed: %s", type(error).__name__)
+        return False
+
+
+def send_email(jobs: list):
+    if not email_configured():
+        return False
+    subject = f"Job Alert: {len(jobs)} new matches found"
+    body = "New job matches:\n\n"
+    for j in jobs[:10]:
+        body += f"• {j['title']} (Score: {j['score']})\n  {j['link']}\n\n"
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_USER
+    msg["To"] = EMAIL_TO
+    try:
+        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as s:
+            s.starttls()
+            s.login(EMAIL_USER, EMAIL_PASS)
+            s.send_message(msg)
+        return True
+    except Exception as error:
+        logger.warning("email notification failed: %s", type(error).__name__)
+        return False
+
+
+def email_configured() -> bool:
+    return all([EMAIL_HOST, EMAIL_USER, EMAIL_PASS, EMAIL_TO])
+
+
+def alerts_configured() -> bool:
+    return bool(NOTIFICATION_WEBHOOK) or email_configured()
+
+
+def check_and_notify():
+    from . import db
+
+    last = get_last_check()
+    jobs = db.get_jobs_since(last)
+    high_score = [j for j in jobs if (j.get("score") or 0) >= MIN_SCORE_NOTIFY]
+    checked_at = datetime.now(timezone.utc).isoformat()
+    if not high_score:
+        set_last_check(checked_at)
+        return 0
+    delivered = [send_webhook(high_score), send_email(high_score)]
+    if any(delivered) or not alerts_configured():
+        set_last_check(checked_at)
+    return len(high_score)
