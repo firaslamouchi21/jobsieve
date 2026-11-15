@@ -1,14 +1,11 @@
-import os
 import time
-
-os.environ["MOCK_SEARCH"] = "true"
-os.environ["USE_PLAYWRIGHT"] = "false"
-os.environ["REQUEST_DELAY_SECONDS"] = "0"
 
 import pytest
 from fastapi.testclient import TestClient
 
-from job_scraper import db, scraper
+from jobsieve.api import api
+from jobsieve import db, scraper
+from jobsieve.sources import ddg
 
 
 def wait_for_status(client: TestClient, target_msg: str, timeout: float = 10.0):
@@ -24,7 +21,7 @@ def wait_for_status(client: TestClient, target_msg: str, timeout: float = 10.0):
 
 @pytest.fixture
 def client():
-    return TestClient(scraper.api)
+    return TestClient(api)
 
 
 class TestHealthEndpoints:
@@ -226,3 +223,47 @@ class TestExport:
         assert content
         lines = content.strip().split("\n")
         assert len(lines) >= 1
+
+
+class TestSearchScope:
+
+    def test_no_sites_uses_default_site_list(self, client, monkeypatch):
+        queries = []
+
+        def fake_search(query, max_results=10):
+            queries.append(query)
+            return []
+
+        monkeypatch.setattr(ddg, "ddg_text", fake_search)
+        client.post(
+            "/run",
+            json={"provider": "groq", "lite_mode": True, "sites": [], "keywords": ["python"]},
+        )
+        wait_for_status(client, "complete")
+        assert len(queries) == len(ddg.DEFAULT_SITES)
+        assert all(q.startswith("site:") for q in queries)
+
+    def test_default_sites_can_be_overridden_by_env(self, monkeypatch):
+        monkeypatch.setenv("DEFAULT_SITES", "a.com, b.com")
+        assert ddg.default_sites() == ["a.com", "b.com"]
+
+    def test_progress_never_exceeds_100(self, client, monkeypatch):
+        seen = []
+        original = scraper.write_status
+
+        def spy(message, progress, meta=None):
+            seen.append(progress)
+            original(message, progress, meta)
+
+        monkeypatch.setattr(scraper, "write_status", spy)
+        client.post(
+            "/run",
+            json={
+                "provider": "groq",
+                "lite_mode": True,
+                "sites": ["example.com"],
+                "keywords": ["a", "b", "c"],
+            },
+        )
+        wait_for_status(client, "complete")
+        assert seen and max(seen) <= 100
