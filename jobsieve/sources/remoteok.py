@@ -1,5 +1,5 @@
 from . import base
-from .base import FeedSource, JobRecord, html_to_text
+from .base import FeedSource, JobRecord, html_to_text, repair_mojibake
 
 URL = "https://remoteok.com/api"
 
@@ -19,15 +19,15 @@ def parse(payload) -> list[JobRecord]:
             continue
         records.append(
             JobRecord(
-                title=str(item["position"]).strip(),
-                company=str(item.get("company") or "").strip(),
+                title=repair_mojibake(str(item["position"])).strip(),
+                company=repair_mojibake(str(item.get("company") or "")).strip(),
                 url=str(item.get("url") or item.get("apply_url") or ""),
                 source="remoteok",
-                location=str(item.get("location") or ""),
+                location=repair_mojibake(str(item.get("location") or "")),
                 remote=True,
                 salary=salary_text(item),
                 posted_at=str(item.get("date") or ""),
-                description=html_to_text(item.get("description")),
+                description=html_to_text(repair_mojibake(item.get("description"))),
             )
         )
     return records

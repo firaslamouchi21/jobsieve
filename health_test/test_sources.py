@@ -295,6 +295,9 @@ class TestHtmlToText:
     def test_real_text_with_angle_brackets_is_kept(self):
         assert base.html_to_text("salary < 5000 and > 100") == "salary < 5000 and > 100"
 
+    def test_script_and_style_content_is_dropped(self):
+        assert base.html_to_text("<style>p{color:red}</style><script>alert(1)</script><p>Hello</p>") == "Hello"
+
     def test_empty_values(self):
         assert base.html_to_text(None) == "" and base.html_to_text("") == ""
 
@@ -318,3 +321,19 @@ class TestWholeWordMatching:
         assert base.matches_keywords(self.record("C++ developer"), ["c++"])
         assert base.matches_keywords(self.record("Senior C# / .NET developer"), ["c#"])
         assert not base.matches_keywords(self.record("C developer"), ["c++"])
+
+
+class TestMojibake:
+
+    def test_double_encoded_text_is_repaired(self):
+        broken = "Ù\x85Ø³Ù\x82Ø·".encode("latin-1", errors="ignore") if False else "مسقط".encode("utf-8").decode("latin-1")
+        assert base.repair_mojibake(broken) == "مسقط"
+
+    def test_clean_and_unfixable_text_is_left_alone(self):
+        assert base.repair_mojibake("Café München") == "Café München"
+        assert base.repair_mojibake("â\x80 broken \u2603") == "â\x80 broken \u2603"
+        assert base.repair_mojibake(None) == ""
+
+    def test_remoteok_parser_repairs_locations(self):
+        payload = [{"position": "Dev", "company": "Acme", "location": "مسقط".encode("utf-8").decode("latin-1"), "url": "u"}]
+        assert remoteok.parse(payload)[0].location == "مسقط"

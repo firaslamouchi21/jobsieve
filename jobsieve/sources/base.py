@@ -35,6 +35,19 @@ class JobRecord:
         return asdict(self)
 
 
+MOJIBAKE_MARKERS = re.compile(r"[ÃÂÙØâ][\x80-\xbf\u0080-\u00bf]|Ã|â\x80")
+
+
+def repair_mojibake(text: str | None) -> str:
+    value = str(text or "")
+    if not MOJIBAKE_MARKERS.search(value):
+        return value
+    try:
+        return value.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return value
+
+
 TAG_PATTERN = re.compile(r"<[a-zA-Z/][^>]*>")
 
 
@@ -43,7 +56,10 @@ def html_to_text(html: str | None) -> str:
         return ""
     text = str(html)
     for _ in range(2):
-        text = BeautifulSoup(text, "html.parser").get_text(" ", strip=True)
+        soup = BeautifulSoup(text, "html.parser")
+        for tag in soup(["script", "style"]):
+            tag.decompose()
+        text = soup.get_text(" ", strip=True)
         if not TAG_PATTERN.search(text):
             break
     return text[:MAX_DESCRIPTION_CHARS]
