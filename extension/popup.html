@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 13px system-ui, sans-serif; width: 340px; margin: 12px; color: #1b1b1f; }
+    h1 { font-size: 15px; margin: 0 0 8px; }
+    .card { border: 1px solid #ccc; border-radius: 6px; padding: 8px; margin: 8px 0; }
+    .muted { color: #666; }
+    .good { color: #0a7d33; } .warn { color: #b25e00; } .bad { color: #b00020; }
+    button { padding: 6px 10px; margin-right: 6px; }
+    label { display: block; margin-top: 6px; }
+    input { width: 100%; box-sizing: border-box; padding: 4px; }
+    details { margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Jobsieve Capture</h1>
+  <div id="preview" class="card muted">Reading this page...</div>
+  <button id="save" disabled>Save to Jobsieve</button>
+  <div id="result"></div>
+  <details>
+    <summary>Settings</summary>
+    <label>Jobsieve address <input id="apiUrl" placeholder="http://localhost:8000"></label>
+    <label>API token (if you set one) <input id="token" type="password"></label>
+    <button id="saveSettings">Save settings</button>
+  </details>
+  <p class="muted">Reads the page only when you open this popup. Sends it only to your own Jobsieve address above.</p>
+  <script src="popup.js"></script>
+</body>
+</html>
