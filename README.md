@@ -88,6 +88,10 @@ jobsieve fetch --source remoteok remotive arbeitnow --keyword python "remote bac
 
 This downloads the feeds (cached on disk, see below), keeps listings matching your keywords, saves them to SQLite and prints a JSON array on stdout. Each record has `title`, `company`, `location`, `remote`, `salary`, `posted_at`, `url`, `description`, `source`, `attribution`, `job_hash` and `is_new`. Messages and errors go to stderr, so stdout is always valid JSON. Add `--no-store` to skip the database. Exit code: 0 on success (even if one source failed; its error is on stderr), 2 for an unknown source, 3 if every source failed. `jobsieve sources` lists the available sources. A caller that scores listings itself can write the result back with `jobsieve.db.set_score(job_hash, score, reasoning)`.
 
+### Save a job from any website (browser extension)
+
+The `extension/` folder holds a small browser extension. Open a job page on any site, click the button, and the job is saved to your own Jobsieve with the same eligibility check. It reads a page only when you click, sends it only to your local Jobsieve, and never fetches pages itself. See [extension/README.md](extension/README.md) for what it can read and how to install it.
+
 ## How scoring works
 
 **AI mode.** When a key is set for the selected provider (in the sidebar, the CLI, or `.env`) the listing text, your CV and your keywords go to that provider and it returns a score and a short reason. Models are configurable with `GROQ_MODEL`, `GEMINI_MODEL` and `ANTHROPIC_MODEL`; check each provider's docs for current names, because providers retire models.

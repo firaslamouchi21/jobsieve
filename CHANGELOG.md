@@ -17,6 +17,8 @@ Version 0.4.0 was prepared but never released; its changes are part of 2.0.0.
 
 ### Added
 
+- **Browser capture extension** (`extension/`) and `POST /ingest`: save the job page you are viewing, on any site, to your local Jobsieve with an eligibility verdict. Reads a page only on click.
+- **Profile and eligibility:** a saved profile (country, work rights, visa needs, relocation, salary floor, dealbreakers) and a verdict of Eligible, Unclear or Not eligible with reasons for every job, in the dashboard, API and CLI.
 - `jobsieve.sources`: one interface and one normalized record (title, company, location, remote, salary, posted date, URL, description, source). Sources: DuckDuckGo search, Remote OK, Remotive, Arbeitnow. Feeds are cached on disk and filtered locally.
 - `jobsieve fetch --source ... --keyword ... --json` fetches and stores listings with no API server, for scripts and AI agents. `jobsieve sources` lists sources. `jobsieve.db.set_score` writes a score and reasons back.
 - `sources` option in `POST /run`, `jobsieve run --sources`, and a Sources picker in the dashboard.
