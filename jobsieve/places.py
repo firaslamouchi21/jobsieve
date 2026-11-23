@@ -86,3 +86,15 @@ def names(codes, limit: int = 4) -> str:
     shown = ordered[:limit]
     extra = len(ordered) - len(shown)
     return ", ".join(shown) + (f" and {extra} more" if extra > 0 else "")
+
+
+def place_phrases(text: str, limit: int = 3) -> list[str]:
+    _, _, pattern, _ = lookups()
+    found: list[str] = []
+    for match in pattern.finditer(text or ""):
+        phrase = match.group(0)
+        if find_places(phrase, regions=False) and phrase.lower() not in (f.lower() for f in found):
+            found.append(phrase)
+        if len(found) >= limit:
+            break
+    return found

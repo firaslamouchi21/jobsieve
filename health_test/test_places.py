@@ -37,11 +37,11 @@ class TestFindPlaces:
     def test_ambiguous_names_are_not_matched(self):
         assert places.find_places("Georgia") == set()
         assert places.find_places("Atlanta, Georgia") == {"US"}
-        assert places.find_places("Birmingham, Alabama") == set()
+        assert places.find_places("Birmingham, Alabama") == {"US"}
         assert places.find_places("a nice team") == set()
 
     def test_word_boundaries(self):
-        assert places.find_places("Indiana") == set()
+        assert places.find_places("Indian ocean") == set()
         assert places.find_places("Omani nationals") == set()
 
 
@@ -82,3 +82,22 @@ class TestRegionsCanBeSwitchedOff:
         assert places.find_places("Schweiz") == {"CH"}
         assert places.find_places("Rostock") == {"DE"}
         assert places.find_places("York") == {"GB"}
+
+
+class TestArabicAndStates:
+
+    def test_arabic_gulf_names(self):
+        assert places.find_places("مسقط") == {"OM"}
+        assert places.find_places("الرياض، السعودية") == {"SA"}
+
+    def test_states_and_provinces(self):
+        assert places.find_places("Ohio") == {"US"} and places.find_places("Quebec") == {"CA"}
+
+
+class TestPlacePhrases:
+
+    def test_returns_phrases_in_order_without_regions(self):
+        assert places.place_phrases("Data Engineer\nDubai, United Arab Emirates\nEMEA") == ["Dubai", "United Arab Emirates"]
+
+    def test_limit_and_duplicates(self):
+        assert places.place_phrases("Dubai Dubai Doha Cairo Riyadh", limit=3) == ["Dubai", "Doha", "Cairo"]
