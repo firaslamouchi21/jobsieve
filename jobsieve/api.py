@@ -7,9 +7,13 @@ import threading
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from pydantic import BaseModel
+from urllib.parse import urlsplit
 
-from . import db, eligibility, scraper
+from pydantic import BaseModel, Field, field_validator
+
+from . import db, eligibility, places, scraper
+from .ai_service import AIService
+from .sources.base import JobRecord, html_to_text
 from . import profile as prof
 
 
@@ -143,6 +147,83 @@ def put_profile(body: dict):
         raise HTTPException(status_code=422, detail=str(error)) from error
     db.init()
     return {"profile": saved, "reevaluated": eligibility.reevaluate_stored(saved)}
+
+
+class IngestRequest(BaseModel):
+    url: str = Field(max_length=2048)
+    title: str = Field(min_length=1, max_length=300)
+    company: str = Field(default="", max_length=200)
+    location: str = Field(default="", max_length=300)
+    description: str = Field(default="", max_length=60000)
+    salary: str = Field(default="", max_length=200)
+    posted_at: str = Field(default="", max_length=40)
+    restrictions: str = Field(default="", max_length=300)
+    remote: bool | None = None
+    site: str = Field(default="", max_length=60)
+
+    @field_validator("url")
+    @classmethod
+    def only_web_urls(cls, value: str) -> str:
+        parts = urlsplit(value.strip())
+        if parts.scheme not in ("http", "https") or not parts.netloc:
+            raise ValueError("url must be an http(s) address")
+        return value.strip()
+
+
+def capture_label(site: str, url: str) -> str:
+    host = (site or urlsplit(url).netloc).lower().removeprefix("www.")
+    safe = "".join(c for c in host if c.isalnum() or c in ".-")[:40]
+    return f"capture:{safe or 'web'}"
+
+
+@api.post("/ingest")
+def ingest(body: IngestRequest):
+    db.init()
+    try:
+        profile = prof.load()
+    except prof.ProfileError:
+        profile = prof.normalize({})
+    location = body.location.strip()
+    if not location:
+        location = ", ".join(places.place_phrases(html_to_text(body.description)[:400]))
+    record = JobRecord(
+        title=body.title.strip(),
+        company=body.company.strip(),
+        url=body.url,
+        source=capture_label(body.site, body.url),
+        location=location,
+        remote=body.remote,
+        salary=body.salary.strip(),
+        posted_at=body.posted_at.strip(),
+        description=html_to_text(body.description),
+        restrictions=body.restrictions.strip(),
+    )
+    score, reasoning = AIService("lite", {}).lite_score(
+        f"{record.title}. {record.description}", profile["keywords"], profile["cv_text"]
+    )
+    extra = {}
+    verdict = None
+    if prof.exists():
+        verdict = eligibility.evaluate(eligibility.job_from_record(record), profile)
+        extra = {
+            "eligibility": verdict["verdict"],
+            "eligibility_reasons": verdict["reasons"],
+            "work_mode": verdict["work_mode"],
+            "seniority": verdict["seniority"] or None,
+            "sponsorship": verdict["sponsorship"] or None,
+            "salary_min": verdict["salary_min"],
+            "salary_max": verdict["salary_max"],
+            "salary_currency": verdict["salary_currency"],
+            "profile_fingerprint": prof.fingerprint(profile),
+        }
+    created = db.upsert_record(record, score, reasoning, None, **extra)
+    return {
+        "job_hash": db.record_hash(record),
+        "is_new": bool(created),
+        "score": score,
+        "eligibility": verdict["verdict"] if verdict else None,
+        "reasons": verdict["reasons"] if verdict else [],
+    }
 
 
 @api.post("/run")

@@ -173,8 +173,11 @@ def job_line(job: dict) -> str:
     parts = [job.get("company"), job.get("location"), job.get("salary")]
     if job.get("remote"):
         parts.append("remote")
-    source = REGISTRY.get(job.get("source") or "")
-    if source and source.name != "ddg":
+    raw_source = job.get("source") or ""
+    source = REGISTRY.get(raw_source)
+    if raw_source.startswith("capture:"):
+        parts.append(f"captured from {raw_source.split(':', 1)[1]}")
+    elif source and source.name != "ddg":
         parts.append(f"via {source.label}")
     return " · ".join(str(p) for p in parts if p)
 

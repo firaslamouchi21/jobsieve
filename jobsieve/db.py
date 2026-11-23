@@ -281,7 +281,7 @@ def list_jobs(limit=200, run_id=None, eligibility=None):
     limit = max(1, min(int(limit), MAX_LIST_LIMIT))
     where, params = [], []
     if run_id:
-        where.append("run_id = ?")
+        where.append("(run_id = ? OR source LIKE 'capture:%')")
         params.append(run_id)
     if eligibility:
         wanted = [e for e in eligibility if e in ("eligible", "not_eligible", "unknown", "unchecked")]
