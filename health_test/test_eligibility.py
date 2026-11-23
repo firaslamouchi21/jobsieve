@@ -269,10 +269,14 @@ class TestRealListingRegressions:
         j = job(title="Account Manager EMEA", location="Smallville", remote=False)
         assert verdict(j) == "unknown"
 
-    def test_explicit_not_remote_flag_beats_remote_wording_in_the_description(self):
-        j = job(location="United Kingdom", remote=False, description="This is a fully remote position within the UK.")
+    def test_not_remote_flag_with_remote_wording_is_a_conflict_not_a_block(self):
+        j = job(location="United Kingdom", remote=False, description="This is a fully remote position. Fully remote within the UK.")
         r = el.evaluate(j, GULF)
-        assert r["work_mode"] == "onsite" and r["verdict"] == "not_eligible"
+        assert r["verdict"] == "unknown" and "check the listing" in r["reasons"][0]
+
+    def test_not_remote_flag_without_remote_wording_still_blocks(self):
+        j = job(location="United Kingdom", remote=False, description="Come to our office every day.")
+        assert verdict(j) == "not_eligible"
 
     def test_remote_with_only_a_city_hint_is_unclear_for_outsiders(self):
         r = el.evaluate(job(remote=True, location="Paris"), GULF)
@@ -292,3 +296,48 @@ class TestRealListingRegressions:
         j = job(location="Zürich, Zürich, Schweiz", remote=False)
         assert "Switzerland" in el.evaluate(j, GULF)["reasons"][0]
         assert verdict(job(location="Rostock", remote=False)) == "not_eligible"
+
+
+class TestSecondRoundFromLabelledListings:
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Location: 100% remote (Ohio residency required).",
+            "This position is based in Germany with hybrid or remote working options.",
+            "Mostly remote (within Germany), monthly meetups in Berlin.",
+        ],
+    )
+    def test_more_restriction_wording_blocks_outside_candidates(self, text):
+        assert verdict(job(remote=True, description=text)) == "not_eligible", text
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Our team is a global talent powerhouse, working remotely from every corner of the world.",
+            "100% Remote: Du arbeitest von überall auf der Welt.",
+        ],
+    )
+    def test_more_global_wording_confirms(self, text):
+        assert verdict(job(remote=True, description=text)) == "eligible", text
+
+    def test_german_flexible_remote_text_with_a_city_is_not_blocked(self):
+        j = job(location="Stuttgart", remote=False, description="Du arbeitest flexibel von wo du möchtest. 100% Remote.")
+        assert verdict(j) != "not_eligible"
+
+    def test_us_states_are_places(self):
+        assert verdict(job(remote=True, description="Must be based in Texas or Ohio.")) == "not_eligible"
+
+
+class TestStatedRequirementWithoutWorkMode:
+
+    def test_clear_location_requirement_applies_even_when_mode_is_unknown(self):
+        j = job(description="We are hiring. Candidates must be based in the United States.")
+        r = el.evaluate(j, GULF)
+        assert r["work_mode"] == "unknown" and r["verdict"] == "not_eligible"
+
+    def test_requirement_matching_your_country_is_eligible(self):
+        assert verdict(job(description="Candidates must be based in the UAE.")) == "eligible"
+
+    def test_no_requirement_and_no_location_stays_unknown(self):
+        assert verdict(job(description="We are hiring.")) == "unknown"

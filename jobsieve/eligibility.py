@@ -52,6 +52,9 @@ RESTRICTION_CUES = (
         r"\b(?:must|need to)\s+(?:be\s+)?(?:legally\s+)?(?:authori[sz]ed|eligible|permitted|entitled)\s+to\s+work\s+in\s+(?P<p>" + span(2, 100) + r")",
         re.I,
     ),
+    re.compile(r"\b(?:position|role|job|post)\s+is\s+based\s+in\s+(?:the\s+)?(?P<p>" + span(2, 60) + r")", re.I),
+    re.compile(r"\bremote\s*(?:work\s*)?[\(:\-–]?\s*(?:only\s+)?(?:within|in)\s+(?:the\s+)?(?P<p>" + span(2, 40) + r")", re.I),
+    re.compile(r"(?P<p>" + span(2, 40) + r")\s+residen(?:cy|t|ts)\s+(?:is\s+)?required", re.I),
     re.compile(r"\bright\s+to\s+work\s+in\s+(?P<p>" + span(2, 100) + r")", re.I),
     re.compile(r"(?P<p>" + span(2, 45) + r")\s+(?:residents|citizens|candidates|applicants)\s+only\b", re.I),
     re.compile(r"\banywhere\s+in\s+(?!the\s+world)(?P<p>" + span(2, 60) + r")", re.I),
@@ -62,7 +65,9 @@ OPEN_WORLDWIDE = re.compile(
     r"work(?:ing)?\s+(?:remotely\s+)?from\s+anywhere\s+in\s+the\s+world"
     r"|(?:fully\s+)?remote\s*[-,(]?\s*(?:open\s+)?(?:worldwide|globally|global\b)"
     r"|open\s+to\s+(?:candidates\s+|applicants\s+)?(?:from\s+)?(?:anywhere|worldwide|all\s+countries|around\s+the\s+world)"
-    r"|hire\s+(?:talent\s+|people\s+|team\s+members\s+|employees\s+)?(?:globally|worldwide|anywhere)",
+    r"|hire\s+(?:talent\s+|people\s+|team\s+members\s+|employees\s+)?(?:globally|worldwide|anywhere)"
+    r"|from\s+every\s+corner\s+of\s+the\s+world|remotely\s+from\s+anywhere\s+in\s+the\s+world"
+    r"|von\s+überall\s+(?:auf\s+der\s+welt|aus)|von\s+wo\s+du\s+(?:möchtest|willst)|weltweit\s+remote|remote\s+weltweit",
     re.I,
 )
 UTC_OFFSET = re.compile(r"(?:UTC|GMT)\s*([+\-−–])\s*(\d{1,2})(?::(\d{2}))?", re.I)
@@ -107,6 +112,17 @@ def detect_work_mode(job: dict) -> str:
     if re.search(r"on-?site (?:role|position|work)|(?:role|position) is on-?site|in-office", body):
         return "onsite"
     return "onsite" if remote is False else "unknown"
+
+
+STRONG_REMOTE = re.compile(
+    r"100\s?%\s*remote|fully\s+remote|remote[- ]first|von\s+überall|von\s+wo\s+du\s+(?:möchtest|willst)", re.I
+)
+
+
+def mode_conflict(job: dict) -> bool:
+    return remote_flag(job.get("remote")) is False and bool(
+        STRONG_REMOTE.search(clean(job.get("description")))
+    )
 
 
 def detect_sponsorship(text: str) -> str:
@@ -159,7 +175,8 @@ def check_location(job, facts, profile, outcome):
         outcome["unresolved"].append("add your country to the profile so location can be checked")
         return
     mode = facts["work_mode"]
-    if mode == "remote":
+    stated = parse_text_restriction(clean(job.get("description")))
+    if mode == "remote" or (mode == "unknown" and stated["places"] and not stated["weak"]):
         check_remote_scope(job, facts, user, relocate, outcome)
     else:
         check_physical_location(job, facts, profile, user, relocate, outcome)
@@ -243,6 +260,11 @@ def check_physical_location(job, facts, profile, user, relocate, outcome):
         else:
             outcome["unresolved"].append(f"{shown}in {target}, a relocation target; the listing does not mention sponsorship")
         return
+    if facts["mode_conflict"]:
+        outcome["unresolved"].append(
+            f"source says on-site in {places.names(found)} but the text says fully remote; check the listing"
+        )
+        return
     outcome["blockers"].append(
         f"{shown}in {places.names(found)}, outside your work authorization and relocation list"
     )
@@ -288,6 +310,7 @@ def extract_facts(job: dict) -> dict:
     text = clean(job.get("description"))
     return {
         "work_mode": detect_work_mode(job),
+        "mode_conflict": mode_conflict(job),
         "seniority": detect_seniority(job.get("title") or ""),
         "sponsorship": detect_sponsorship(text),
         "relocation_offered": bool(RELOCATION_OFFERED.search(text)),
