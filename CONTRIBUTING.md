@@ -2,7 +2,7 @@
 
 ## Development
 
-- Use Docker Compose to run the full stack. For code changes, a virtualenv is faster: `pip install -e ".[all,dev]" && python -m pytest health_test/`. Tests are offline (`MOCK_SEARCH`, no browser, no network).
+- Use Docker Compose to run the full stack. For code changes, a virtualenv is faster: `pip install -e ".[all,dev]" && python -m pytest health_test/`. Tests are offline (`MOCK_SEARCH`, no browser, no network). The browser extension has its own tests: `node --test extension/test/extract.test.js`.
 - Keep changes minimal and production-minded.
 
 ## Style rules
