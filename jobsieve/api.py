@@ -156,6 +156,21 @@ def tailor_markdown(job_hash: str):
     return Response(content=tailor.to_markdown(job, job["tailoring"]), media_type="text/markdown")
 
 
+@api.get("/summary")
+def summary():
+    db.init()
+    last_visit = db.get_meta("last_visit")
+    if not last_visit:
+        db.set_meta("last_visit", db.now_iso())
+    return db.summary(last_visit)
+
+
+@api.post("/visit")
+def visit():
+    db.set_meta("last_visit", db.now_iso())
+    return {"ok": True}
+
+
 @api.get("/stats")
 def stats(days: int = 7):
     from datetime import datetime, timedelta, timezone

@@ -14,6 +14,7 @@ The rules are fixed and run on your machine. No AI is involved, so the same job 
    - For remote jobs: the countries the source states (Remotive, Himalayas, Jobicy and Working Nomads publish a field for this), then phrases in the text such as "US only", "must be based in", "EMEA", "UTC+3".
    - For on-site and hybrid jobs: the city or country of the job against the countries you can work in without sponsorship.
    - A job outside those countries is not eligible unless it is in a country you listed for relocation. Then the listing's visa or relocation wording decides: it says it does not sponsor visas (not eligible), offers sponsorship or relocation (eligible), or says nothing (eligible if you do not need a visa, otherwise unclear).
+   - If the listing does not state a work mode, its location field names a country you cannot work in or relocate to, and nothing in its text mentions remote, hybrid or home working, it is not eligible (since 2.0.1; before that it was unclear).
 2. **Your own rules.** Companies you skip, dealbreaker words, work modes you exclude, and a pay floor (only when the listing states pay in your currency).
 3. **Time zones.** If you gave a maximum gap and the listing states a zone.
 4. **Citizenship or security clearance wording** makes a job unclear, never not eligible.
@@ -24,7 +25,7 @@ Place names come from a built-in table of about 200 countries, 350 cities, US st
 
 The reason says which. The common ones:
 
-- It is located in a country you cannot work in, and the listing does not say whether it can be done remotely.
+- It is located in a country you cannot work in, its work mode is not stated, and the text mentions remote work somewhere (or there is no description to read).
 - It says remote but not which countries may apply.
 - The source's location field and the text disagree (for example "on-site" in one place and "fully remote" in the other).
 - It mentions clearance or citizenship.
@@ -43,7 +44,7 @@ On 70 real listings I labelled by hand for one profile (lives in the UAE, can wo
 
 Read that with its limits: it is a small sample, I did the labelling, it is one profile, three sources, and I tuned the rules while looking at those listings, so the true error rate on new listings will be higher. The design leans cautious on purpose: when unsure it says unclear. A wrong "not eligible" is the costly error because it can hide a job you could have had, so that is the one to watch. If you find one, please open an issue with the listing and your profile settings.
 
-On a larger run (23 Nov 2026: 4,628 listings, a UAE profile) the verdicts were about 5% eligible, 70% unclear and 25% not eligible. The large unclear share is mostly on-site jobs abroad whose listings do not say whether they can be done remotely.
+On a larger run (listings fetched 23 Nov 2026, re-checked with the 2.0.1 rules: 4,765 stored listings, a UAE profile) about 5% were eligible, 22% unclear and 72% not eligible. That mix was dominated by a few large US employers, so yours will differ.
 
 ## What it does not know
 

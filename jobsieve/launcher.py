@@ -18,15 +18,23 @@ def start(api_port: int = 8000, ui_port: int = 8501, open_browser: bool = True) 
         print(f"missing pieces: pip install \"jobsieve[{','.join(missing)}]\"", file=sys.stderr)
         return 2
     app_file = importlib.util.find_spec("jobsieve.app").origin
+    # Streamlit reads its theme from the working directory.
+    theme_dir = os.path.join(os.path.dirname(os.path.abspath(app_file)), "data")
 
-    env = {**os.environ, "SCRAPER_URL": f"http://127.0.0.1:{api_port}"}
+    env = {
+        **os.environ,
+        "DATA_DIR": os.path.abspath(os.environ.get("DATA_DIR", "./data")),
+        "CONFIG_DIR": os.path.abspath(os.environ.get("CONFIG_DIR", "./config")),
+        "SCRAPER_URL": f"http://127.0.0.1:{api_port}",
+    }
     api = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "jobsieve.api:api", "--host", "127.0.0.1", "--port", str(api_port)], env=env
     )
     ui = subprocess.Popen(
         [sys.executable, "-m", "streamlit", "run", app_file, "--server.port", str(ui_port), "--server.headless", "true",
-         "--browser.gatherUsageStats", "false", "--server.address", "127.0.0.1"],
+         "--server.address", "127.0.0.1"],
         env=env,
+        cwd=theme_dir,
     )
     address = f"http://127.0.0.1:{ui_port}"
     print(f"Jobsieve is starting. Open {address} (Ctrl+C to stop)", file=sys.stderr)

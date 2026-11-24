@@ -15,7 +15,7 @@ class TestDemo:
         jobs = db.list_jobs(limit=50)
         assert len(jobs) == len(demo.DEMO_JOBS)
         verdicts = {j["eligibility"] for j in jobs}
-        assert "eligible" in verdicts and "not_eligible" in verdicts
+        assert verdicts == {"eligible", "unknown", "not_eligible"}
         assert all(j["link"].startswith("https://example.com/demo/") for j in jobs)
 
     def test_seeding_twice_does_not_duplicate(self):
@@ -42,7 +42,7 @@ class TestLauncher:
         started = []
 
         class Process:
-            def __init__(self, cmd, env=None):
+            def __init__(self, cmd, env=None, cwd=None):
                 started.append((cmd, env)); self.polled = 0; self.ended = False
             def poll(self):
                 self.polled += 1
@@ -51,7 +51,7 @@ class TestLauncher:
             def wait(self, timeout=None): return 0
             def kill(self): pass
 
-        monkeypatch.setattr(launcher.subprocess, "Popen", lambda cmd, env=None: Process(cmd, env))
+        monkeypatch.setattr(launcher.subprocess, "Popen", lambda cmd, env=None, cwd=None: Process(cmd, env, cwd))
         monkeypatch.setattr(launcher.time, "sleep", lambda s: None)
         monkeypatch.setattr(launcher, "missing_extras", lambda: [])
         assert launcher.start(9000, 9500, open_browser=False) == 0

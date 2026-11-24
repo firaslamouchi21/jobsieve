@@ -1,6 +1,22 @@
 # Changelog
 
-## 2.0.0 (not yet released)
+## 2.0.1 (2026-11-24)
+
+### Fixed
+
+- Application drafts (`jobsieve tailor`) had literal `\n` text instead of line breaks, in the Markdown and in the prompt sent to the model.
+- Saving the profile in the dashboard erased languages, sites and sources set elsewhere.
+- Re-checking saved jobs after a profile change was slow enough to time out with a few thousand jobs. It is now many times faster.
+- The README's links and images work on PyPI.
+
+### Changed
+
+- **New dashboard design:** separate Jobs, Search, Profile and Watchlist pages, compact job cards with verdict badges, paging, notes, and a phone layout. It talks only to the API, so it no longer needs the database folder. Listing text is shown as plain text. "Restart Run" and the "All except hidden" view are gone. Needs Streamlit 1.56 or newer.
+- **Eligibility:** a job in a country where you cannot work or relocate, with no stated work mode and no mention of remote work, is now not eligible instead of unclear.
+- Removed `render.yaml` and `railway.json`. They were never tested, and Jobsieve is meant to run on your own machine.
+- New endpoints `GET /summary` and `POST /visit`.
+
+## 2.0.0 (2026-11-24)
 
 Version 0.4.0 was prepared but never released; its changes are part of 2.0.0.
 
