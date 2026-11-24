@@ -24,6 +24,7 @@ DEMO_JOBS = [
     ("Software Engineer", "Demo Health", "Remote (EMEA)", True, "Remote within EMEA time zones.", 1, "jobicy"),
     ("Platform Engineer", "Demo Gov", "Washington, United States", False, "US citizenship and security clearance required.", 6, "greenhouse"),
     ("Data Analyst", "Demo Media", "Dubai, United Arab Emirates", False, "SQL and dashboards. Dubai.", 70, "lever"),
+    ("Cloud Engineer", "Demo Mobility", "Berlin, Germany", None, "AWS and Python. Build the platform team. Some remote days.", 8, "greenhouse"),
     ("DevOps Engineer", "Demo Telecom", "Abu Dhabi, United Arab Emirates", False, "Kubernetes and Terraform. Abu Dhabi.", 3, "workingnomads"),
 ]
 

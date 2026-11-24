@@ -224,6 +224,25 @@ def get_job(job_hash_value: str):
     return decode_job(row) if row else None
 
 
+def summary(last_visit: str) -> dict:
+    conn = connect()
+    visible = "duplicate_of IS NULL AND closed_at IS NULL AND (expires_at IS NULL OR expires_at > ?)"
+    now = now_iso()
+    by_status = conn.execute(
+        f"SELECT COALESCE(status, 'new') AS k, COUNT(*) AS n FROM jobs WHERE {visible} GROUP BY k", (now,)
+    ).fetchall()
+    verdicts = conn.execute(
+        "SELECT COALESCE(eligibility, 'unchecked') AS k, COUNT(*) AS n FROM jobs "
+        f"WHERE {visible} AND COALESCE(status, 'new') = 'new' GROUP BY k", (now,)
+    ).fetchall()
+    conn.close()
+    return {
+        "by_status": {r["k"]: r["n"] for r in by_status},
+        "inbox_by_eligibility": {r["k"]: r["n"] for r in verdicts},
+        "new_since_visit": count_new_since(last_visit) if last_visit else 0,
+    }
+
+
 def find_hashes(prefix: str) -> list[str]:
     prefix = "".join(c for c in str(prefix) if c.isalnum())
     if len(prefix) < 6:
@@ -585,9 +604,16 @@ def jobs_for_evaluation():
     return [dict(r) for r in rows]
 
 
-def save_evaluation(job_hash_value: str, evaluation: dict, fingerprint: str):
-    values = prepare_details(
-        {
+EVALUATION_FIELDS = (
+    "eligibility", "eligibility_reasons", "work_mode", "seniority", "sponsorship",
+    "salary_min", "salary_max", "salary_currency", "profile_fingerprint",
+)
+
+
+def save_evaluations(evaluations, fingerprint: str):
+    rows = []
+    for job_hash_value, evaluation in evaluations:
+        values = prepare_details({
             "eligibility": evaluation["verdict"],
             "eligibility_reasons": evaluation["reasons"],
             "work_mode": evaluation["work_mode"],
@@ -597,15 +623,11 @@ def save_evaluation(job_hash_value: str, evaluation: dict, fingerprint: str):
             "salary_max": evaluation["salary_max"],
             "salary_currency": evaluation["salary_currency"],
             "profile_fingerprint": fingerprint,
-        }
-    )
-    changes = {k: v for k, v in values.items() if k in (
-        "eligibility", "eligibility_reasons", "work_mode", "seniority", "sponsorship",
-        "salary_min", "salary_max", "salary_currency", "profile_fingerprint",
-    )}
-    sets = ", ".join(f"{k} = ?" for k in changes)
+        })
+        rows.append((*(values[f] for f in EVALUATION_FIELDS), job_hash_value))
     conn = connect()
-    conn.execute(f"UPDATE jobs SET {sets} WHERE job_hash = ?", (*changes.values(), job_hash_value))
+    sets = ", ".join(f"{field} = ?" for field in EVALUATION_FIELDS)
+    conn.executemany(f"UPDATE jobs SET {sets} WHERE job_hash = ?", rows)
     conn.commit()
     conn.close()
 

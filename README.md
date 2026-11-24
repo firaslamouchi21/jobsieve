@@ -9,13 +9,13 @@
 
 Built it for myself while job hunting. It found the job. Now it is open for you.
 
-![Jobsieve dashboard](docs/screenshots/dashboard.png)
+![Jobsieve dashboard](https://raw.githubusercontent.com/firaslamouchi21/jobsieve/main/docs/screenshots/dashboard.png)
 
 ## Why this one
 
-- **It answers "can I apply?"** Remote only for the US, on-site abroad with no visa, clearance required: each job gets a verdict and the reasons, and anything it is unsure about says "unclear". Nothing is hidden or deleted. [How verdicts work, and how accurate they are](docs/eligibility.md).
+- **It answers "can I apply?"** Remote only for the US, on-site abroad with no visa, clearance required: each job gets a verdict and the reasons, and anything it is unsure about says "unclear". Nothing is hidden or deleted. [How verdicts work, and how accurate they are](https://github.com/firaslamouchi21/jobsieve/blob/main/docs/eligibility.md).
 - **It reaches past the usual feeds.** Remote job feeds, the career boards of companies you watch (Greenhouse, Lever, Ashby, SmartRecruiters), pages you list, and a browser extension that saves the job page you are looking at, on any site.
-- **Your data stays yours.** Everything lands in a local SQLite file. No accounts, no telemetry. [What can leave your machine, and when](docs/privacy.md).
+- **Your data stays yours.** Everything lands in a local SQLite file. No accounts, no telemetry. [What can leave your machine, and when](https://github.com/firaslamouchi21/jobsieve/blob/main/docs/privacy.md).
 - **AI is optional, and any model works.** Use Groq, Gemini, Anthropic, OpenAI, or a local model through Ollama or LM Studio, or run free in Lite Mode with no key. Draft CV tweaks and a cover letter for a job, without invented experience.
 - **Run it your way.** `jobsieve start` runs the dashboard and API with no Docker, or use Docker Compose. Everything the dashboard does is also a REST endpoint, a CLI command and an MCP tool for AI agents.
 
@@ -27,7 +27,7 @@ Built it for myself while job hunting. It found the job. Now it is open for you.
 - Search the web, or pull from Remote OK, Remotive, Arbeitnow, Himalayas, Jobicy, Working Nomads and your watchlist of companies
 - Every job scored 0-10 (AI or Lite Mode), exports as JSON or CSV
 
-![Sidebar: sites, keywords, CV, and run controls](docs/screenshots/controls.png)
+![Search page](https://raw.githubusercontent.com/firaslamouchi21/jobsieve/main/docs/screenshots/search.png)
 
 ## How to run it
 
@@ -73,7 +73,7 @@ With the extras installed:
 
 ```bash
 python -m uvicorn jobsieve.api:api --port 8000
-streamlit run "$(python -c 'import jobsieve.app as a; print(a.__file__)')"
+jobsieve start
 ```
 
 Fetching full job pages with a headless browser needs `[browser]` and `playwright install chromium`. Without it, set `USE_PLAYWRIGHT=false` and the scraper uses plain HTTP requests.
@@ -94,21 +94,21 @@ This downloads the feeds (cached on disk, see below), keeps listings matching yo
 
 ### Save a job from any website (browser extension)
 
-The `extension/` folder holds a small browser extension. Open a job page on any site, click the button, and the job is saved to your own Jobsieve with the same eligibility check. It reads a page only when you click, sends it only to your local Jobsieve, and never fetches pages itself. See [extension/README.md](extension/README.md) for what it can read and how to install it.
+The `extension/` folder holds a small browser extension. Open a job page on any site, click the button, and the job is saved to your own Jobsieve with the same eligibility check. It reads a page only when you click, sends it only to your local Jobsieve, and never fetches pages itself. See [extension/README.md](https://github.com/firaslamouchi21/jobsieve/blob/main/extension/README.md) for what it can read and how to install it.
 
 ### Let an AI agent use it (MCP)
 
-`pip install "jobsieve[mcp]"`, then add `jobsieve mcp` to your agent as a stdio MCP server (for Claude Code: `claude mcp add jobsieve -- jobsieve mcp`; in other clients, a server with the command `jobsieve` and the argument `mcp`). Set `DATA_DIR` in its environment if your data lives somewhere other than `./data`. The agent gets ten tools: `search_jobs`, `list_jobs`, `get_job`, `set_score`, `set_status`, `save_application_draft`, `get_profile`, `watch_company`, `digest` and `list_sources`, so it can search, judge and track with its own model and no AI key of yours. Note that `get_profile` hands your agent your CV text, so use an agent you trust with it. [skills/jobsieve/SKILL.md](skills/jobsieve/SKILL.md) is a ready-made agent skill that describes the workflow and its rules.
+`pip install "jobsieve[mcp]"`, then add `jobsieve mcp` to your agent as a stdio MCP server (for Claude Code: `claude mcp add jobsieve -- jobsieve mcp`; in other clients, a server with the command `jobsieve` and the argument `mcp`). Set `DATA_DIR` in its environment if your data lives somewhere other than `./data`. The agent gets ten tools: `search_jobs`, `list_jobs`, `get_job`, `set_score`, `set_status`, `save_application_draft`, `get_profile`, `watch_company`, `digest` and `list_sources`, so it can search, judge and track with its own model and no AI key of yours. Note that `get_profile` hands your agent your CV text, so use an agent you trust with it. [skills/jobsieve/SKILL.md](https://github.com/firaslamouchi21/jobsieve/blob/main/skills/jobsieve/SKILL.md) is a ready-made agent skill that describes the workflow and its rules.
 
 ## How scoring works
 
-**AI mode.** When a key is set for the selected provider (in the sidebar, the CLI, or `.env`) the listing text, your CV and your keywords go to that provider and it returns a score and a short reason. Models are configurable with `GROQ_MODEL`, `GEMINI_MODEL` and `ANTHROPIC_MODEL`; check each provider's docs for current names, because providers retire models.
+**AI mode.** When a key is set for the selected provider (on the Search page, the CLI, or `.env`) the listing text, your CV and your keywords go to that provider and it returns a score and a short reason. Models are configurable with `GROQ_MODEL`, `GEMINI_MODEL` and `ANTHROPIC_MODEL`; check each provider's docs for current names, because providers retire models.
 
 **Any model, including local ones.** Choose the `openai` provider for anything that speaks the OpenAI chat format: OpenAI, OpenRouter, or a model on your own machine through Ollama or LM Studio. Set `OPENAI_MODEL` (required), `OPENAI_BASE_URL` (default `https://api.openai.com/v1`; for Ollama `http://localhost:11434/v1`) and `OPENAI_API_KEY` (not needed for a local address). With a local model your CV never leaves your machine. If the server rejects JSON mode, Jobsieve retries once without it.
 
 **Keeping AI cost down.** The model is asked only about jobs that are not already marked not eligible, only when the listing, your CV, your keywords or your profile changed since the last AI score, and for at most `AI_MAX_PER_RUN` jobs per run (default 100). The rest get the free Lite score, and the run log says when the cap was reached.
 
-**Help applying.** For one job, `jobsieve tailor <id> --provider openai --out letter.md` (or the "Draft application" box under a job, or `POST /jobs/{hash}/tailor`) asks your model for CV rewrites that fit the job, the requirements your CV does not show, and a cover letter under 250 words. The prompt forbids inventing experience, and any number in the draft that is not in your CV or the listing is flagged "check before sending". It is a draft: read it before you send anything. Results are saved with the job, and `GET /jobs/{hash}/tailor.md` returns them as Markdown. Needs your CV in your profile.
+**Help applying.** For one job, `jobsieve tailor <id> --provider openai --out letter.md` (or the "Application draft" section under a job's Details, or `POST /jobs/{hash}/tailor`) asks your model for CV rewrites that fit the job, the requirements your CV does not show, and a cover letter under 250 words. The prompt forbids inventing experience, and any number in the draft that is not in your CV or the listing is flagged "check before sending". It is a draft: read it before you send anything. Results are saved with the job, and `GET /jobs/{hash}/tailor.md` returns them as Markdown. Needs your CV in your profile.
 
 **If AI scoring fails** (bad key, retired model, rate limit, unparseable reply) the listing falls back to the Lite score, the reasoning starts with `ai_failed: <reason>`, the failure is logged, and the dashboard shows a warning with the count. A failed re-run never overwrites a score that AI already gave.
 
@@ -122,21 +122,21 @@ The `extension/` folder holds a small browser extension. Open a job page on any 
 | `remoteok` | [Remote OK](https://remoteok.com) public API | Full descriptions, remote jobs |
 | `remotive` | [Remotive](https://remotive.com) public API | Full descriptions, remote jobs. Remotive asks for at most 4 requests a day, so its feed is cached for 6 hours. |
 | `arbeitnow` | [Arbeitnow](https://www.arbeitnow.com) public API | Full descriptions, mostly Europe, remote flag |
-| `boards` | Career boards of the companies on your watchlist: Greenhouse, Lever, Ashby, SmartRecruiters | Straight from the employer. Add companies with `jobsieve watch add greenhouse careem` (the name in the board URL), see them with `watch list`, test them with `watch check`, `jobsieve discover --keyword "software engineer" --place Dubai` to find companies by web search (they are marked "discovered"), `jobsieve watch from-page https://company.com/careers` to read a careers page and find the board it uses, or use the Watchlist tab (or `GET/POST /watchlist`, `DELETE /watchlist/{board}/{company}`). Companies are also added automatically when a web-search run returns a link to one of these boards. Cached 6 hours per company. SmartRecruiters gives titles and locations only, no description. |
+| `boards` | Career boards of the companies on your watchlist: Greenhouse, Lever, Ashby, SmartRecruiters | Straight from the employer. Add companies with `jobsieve watch add greenhouse careem` (the name in the board URL), see them with `watch list`, test them with `watch check`, `jobsieve discover --keyword "software engineer" --place Dubai` to find companies by web search (they are marked "discovered"), `jobsieve watch from-page https://company.com/careers` to read a careers page and find the board it uses, or use the Watchlist page (or `GET/POST /watchlist`, `DELETE /watchlist/{board}/{company}`). Companies are also added automatically when a web-search run returns a link to one of these boards. Cached 6 hours per company. SmartRecruiters gives titles and locations only, no description. |
 | `web` | Pages you list with `jobsieve watch add-page URL` | Reads schema.org job data (JSON-LD) on the page, or on job pages it links to (25 at most). Follows robots.txt, waits 2 s or more between requests to a site, stops for the run at a bot check (403, 429 or a CAPTCHA page), never leaves the site. LinkedIn, Indeed and Glassdoor are refused. Pages without structured job data give nothing. Cached 12 hours. Robots.txt is not permission: check each site's terms yourself. |
 | `himalayas` | [Himalayas](https://himalayas.app) public API | Remote jobs with the countries each one accepts, salary and pay period. Newest 200 jobs (`HIMALAYAS_PAGES`, 20 per page), cached 24 hours as Himalayas refreshes daily. |
 | `jobicy` | [Jobicy](https://jobicy.com) public API | Remote jobs with the countries each one accepts and salary. Jobicy asks for a credit and a link to the original job. |
 | `workingnomads` | [Working Nomads](https://www.workingnomads.com) public API | Remote jobs with a region ("Global", "North America") |
 
-Feed sources are downloaded whole, cached in `DATA_DIR/cache` (1 hour, Remotive 6 hours, change with `SOURCE_CACHE_TTL_SECONDS`) and filtered by your keywords on your machine, so repeated runs make few requests. If a feed is unreachable the last cached copy is used. A source that fails is reported and skipped; the run continues. Select sources with `--sources`, the dashboard's Sources box, or `"sources": ["remoteok", "remotive"]` in `POST /run`.
+Feed sources are downloaded whole, cached in `DATA_DIR/cache` (1 hour, Remotive 6 hours, change with `SOURCE_CACHE_TTL_SECONDS`) and filtered by your keywords on your machine, so repeated runs make few requests. If a feed is unreachable the last cached copy is used. A source that fails is reported and skipped; the run continues. Select sources with `--sources`, the Sources box on the Search page, or `"sources": ["remoteok", "remotive"]` in `POST /run`.
 
-**Tracking.** Every job has a status: new, saved, applied, interviewing, offer, rejected or hidden, with a note. Use the Save / Applied / Hide buttons and the Inbox, Saved, Applied, Rejected and Hidden views in the dashboard, `jobsieve mark <id> applied --note "sent CV"` and `jobsieve jobs --status saved` on the command line, or `PATCH /jobs/{job_hash}` with `{"status": "applied", "notes": "..."}`. Hidden jobs stay hidden when they appear again, and alerts skip jobs you have applied to or hidden, duplicates, closed jobs and jobs marked not eligible. "Hide company" adds the company to your profile's skip list. `GET /stats?days=7` counts status changes. CSV exports include status and notes, and cells that start with `=`, `+`, `-` or `@` are prefixed with an apostrophe so spreadsheets do not run them.
+**Tracking.** Every job has a status: new, saved, applied, interviewing, offer, rejected or hidden, with a note. Use the Save, Mark applied and More buttons and the Inbox, Saved, Applied, Rejected and Hidden views in the dashboard, `jobsieve mark <id> applied --note "sent CV"` and `jobsieve jobs --status saved` on the command line, or `PATCH /jobs/{job_hash}` with `{"status": "applied", "notes": "..."}`. Hidden jobs stay hidden when they appear again, and alerts skip jobs you have applied to or hidden, duplicates, closed jobs and jobs marked not eligible. "Skip this company" adds the company to your profile's skip list. `GET /stats?days=7` counts status changes. CSV exports include status and notes, and cells that start with `=`, `+`, `-` or `@` are prefixed with an apostrophe so spreadsheets do not run them.
 
 **Freshness.** Each job shows plain facts: how long ago it was posted, how long you have seen it, reposts (the posted date moved later), and a closing date where the source gives one (Himalayas, Greenhouse, pages with `validThrough`). The label is new (up to 3 days), recent (14), old (45) or stale, by posted date, or by first-seen date if there is none. A job on a watched company board that disappears from the board is marked closed; feeds that only show their newest jobs are not used for this. Closed and expired jobs are hidden unless you ask (`include_closed=true`). These are signals, not a verdict that a job is fake. Jobs are ordered eligible first, then by score, then newest.
 
 **Duplicates.** The same job often appears on several sources. Jobs with the same company, title and city are shown once, preferring the company's own board and then the fuller description, with "also on ..." listing the others. Nothing is deleted. Jobs with no city are never merged, because they can't be told apart safely.
 
-**Attribution and terms.** The full table, with each source's endpoint, cache time and terms, is in [docs/sources.md](docs/sources.md). Remote OK and Remotive require a link back and naming them as the source; every listing keeps its `source` and original URL and the dashboard shows "via Remote OK" and so on. Remotive also forbids submitting its jobs to other job sites. This tool stores listings locally for your own search, so do not republish them. LinkedIn and Indeed are not scraped.
+**Attribution and terms.** The full table, with each source's endpoint, cache time and terms, is in [docs/sources.md](https://github.com/firaslamouchi21/jobsieve/blob/main/docs/sources.md). Remote OK and Remotive require a link back and naming them as the source; every listing keeps its `source` and original URL and the dashboard shows "via Remote OK" and so on. Remotive also forbids submitting its jobs to other job sites. This tool stores listings locally for your own search, so do not republish them. LinkedIn and Indeed are not scraped.
 
 Copy the `config/*.txt.example` files to set default sites, keywords and CV.
 
@@ -201,16 +201,16 @@ curl -X POST http://localhost:8000/stop
 
 ## Privacy
 
-Your CV, profile and jobs stay in files on your machine. The full list of what can leave it, and when, is in [docs/privacy.md](docs/privacy.md).
+Your CV, profile and jobs stay in files on your machine. The full list of what can leave it, and when, is in [docs/privacy.md](https://github.com/firaslamouchi21/jobsieve/blob/main/docs/privacy.md).
 
 ## Security: read this before putting it on the internet
 
 By default the API has **no authentication**, which is fine on `localhost`. If it is reachable from anywhere else, anyone who can reach it can start runs that use your AI keys and read your results.
 
 - Set a long random `API_TOKEN`.
-- `render.yaml` and `railway.json` deploy one service (the combined image) with the API bound to `127.0.0.1`, so only the UI can reach it. The Streamlit UI itself has no login, so put it behind your platform's access controls or a proxy with auth. These two files are untested on the real platforms; check them on your own account.
+- The dashboard has no login. If you run it on a server, keep it private, for example behind Cloudflare Access or a VPN.
 - Never commit `.env`. It is gitignored. If a key was ever pushed, rotate it.
-- Report vulnerabilities privately, see [SECURITY.md](SECURITY.md).
+- Report vulnerabilities privately, see [SECURITY.md](https://github.com/firaslamouchi21/jobsieve/blob/main/SECURITY.md).
 
 ## Makefile shortcuts
 
@@ -223,6 +223,6 @@ make logs
 
 ## Contributing
 
-Issues and PRs are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). If you use this and hit something, opening an issue is the single most useful thing you can do; this is a solo project so far and every report helps.
+Issues and PRs are welcome, see [CONTRIBUTING.md](https://github.com/firaslamouchi21/jobsieve/blob/main/CONTRIBUTING.md). If you use this and hit something, opening an issue is the single most useful thing you can do; this is a solo project so far and every report helps.
 
 If you find it useful, a star helps other people find it too.

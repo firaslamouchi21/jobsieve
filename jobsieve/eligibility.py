@@ -143,12 +143,37 @@ def parse_field_restriction(text: str) -> dict:
     }
 
 
+# Cues that begin with the place would be retried at every character of a long description,
+# so they are only tried near the words they end with.
+TAIL_ANCHORS = {
+    cue: re.compile(tail, re.I)
+    for cue in RESTRICTION_CUES if cue.pattern.startswith("(?P<p>")
+    for tail in [cue.pattern.rsplit("})", 1)[1]]
+}
+TAIL_REACH = 400
+
+
+def cue_matches(cue, text: str):
+    anchor = TAIL_ANCHORS.get(cue)
+    if anchor is None:
+        yield from cue.finditer(text)
+        return
+    position = 0
+    for tail in anchor.finditer(text):
+        if tail.start() < position:
+            continue
+        match = cue.search(text, max(position, tail.start() - TAIL_REACH), tail.end() + TAIL_REACH)
+        if match:
+            position = match.end()
+            yield match
+
+
 def parse_text_restriction(text: str) -> dict:
     found: set[str] = set()
     weak = False
     evidence = ""
     for pattern in RESTRICTION_CUES:
-        for match in pattern.finditer(text):
+        for match in cue_matches(pattern, text):
             span = match.group("p")
             codes = places.find_places(span)
             if not codes:
@@ -233,10 +258,16 @@ def check_remote_scope(job, facts, user, relocate, outcome):
         )
 
 
+REMOTE_HINT = re.compile(
+    r"remot|telecommut|telework|home.?office|work(?:ing)? from home|\bwfh\b|anywhere|hybrid|distributed|t[ée]l[ée]travail|عن بعد", re.I
+)
+
+
 def check_physical_location(job, facts, profile, user, relocate, outcome):
     mode = facts["work_mode"]
     shown = "" if mode == "unknown" else f"{mode} "
     found = places.find_places(clean(job.get("location")), regions=False)
+    from_title = not found
     if not found:
         found = places.find_places(clean(job.get("title")), regions=False)
     if not found:
@@ -246,7 +277,14 @@ def check_physical_location(job, facts, profile, user, relocate, outcome):
         outcome["confirms"].append(f"{shown}in {places.names(user & found)}, where you can work")
         return
     if mode == "unknown":
-        outcome["unresolved"].append(f"located in {places.names(found)}; unclear whether it can be done remotely")
+        hint = REMOTE_HINT.search(clean(f"{job.get('title')} {job.get('location')} {job.get('description')}"))
+        if hint or from_title or relocate & found or not clean(job.get("description")):
+            outcome["unresolved"].append(f"located in {places.names(found)}; unclear whether it can be done remotely")
+        else:
+            outcome["blockers"].append(
+                f"located in {places.names(found)}, outside your work authorization and relocation list, "
+                "and the listing does not mention remote work"
+            )
         return
     if relocate & found:
         target = places.names(relocate & found)
@@ -361,8 +399,8 @@ def reevaluate_stored(profile: dict) -> dict:
 
     fingerprint = prof.fingerprint(profile)
     counts = {ELIGIBLE: 0, NOT_ELIGIBLE: 0, UNKNOWN: 0}
-    for row in db.jobs_for_evaluation():
-        result = evaluate(row, profile)
-        db.save_evaluation(row["job_hash"], result, fingerprint)
+    evaluations = [(row["job_hash"], evaluate(row, profile)) for row in db.jobs_for_evaluation()]
+    db.save_evaluations(evaluations, fingerprint)
+    for _, result in evaluations:
         counts[result["verdict"]] += 1
     return counts

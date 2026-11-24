@@ -17,6 +17,7 @@ Here is everything that can go out, and when.
 
 ## Things worth knowing
 
+- **The dashboard page** loads no fonts, icons or scripts from other sites (checked with the 2.0.1 package by watching the browser's requests).
 - **API keys** you type in the dashboard are used for that run and not saved to disk. Keys in `.env` stay on your machine.
 - **The API has no login by default.** That is fine on `localhost`. If anyone else can reach it, set `API_TOKEN` (see the security section of the README).
 - **Alerts** go to whatever address you configured, so use a channel you control.

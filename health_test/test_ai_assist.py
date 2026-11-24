@@ -188,3 +188,11 @@ def test_config_reports_the_generic_provider(monkeypatch):
     assert client.get("/config").json()["providers"]["openai"] is False
     monkeypatch.setenv("OPENAI_MODEL", "m"); monkeypatch.setenv("OPENAI_BASE_URL", "http://localhost:11434/v1")
     assert client.get("/config").json()["providers"]["openai"] is True
+
+
+def test_drafts_and_prompts_use_real_line_breaks():
+    job = {"title": "T", "company": "C", "link": "https://x/1", "description": "d"}
+    text = tailor.to_markdown(job, {**GOOD, "unverified_numbers": ["40"]})
+    assert text.splitlines()[0] == "# T at C"
+    assert "## Cover letter draft" in text.splitlines()
+    assert "\\n" not in text and "\\n" not in tailor.build_prompt(job, "cv", {})

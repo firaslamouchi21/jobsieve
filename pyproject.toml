@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jobsieve"
-version = "2.0.0"
+version = "2.0.1"
 description = "Sifts job listings down to the ones you are eligible for: free, local-first, with optional AI scoring"
 readme = "README.md"
 license = "Apache-2.0"
@@ -34,7 +34,7 @@ api = [
     "uvicorn[standard]>=0.30,<1",
 ]
 ui = [
-    "streamlit>=1.41,<2",
+    "streamlit>=1.56,<2",
 ]
 browser = [
     "playwright==1.54.0",
@@ -53,7 +53,7 @@ dev = [
     "httpx>=0.27",
     "black>=23.0.0",
     "ruff>=0.1.0",
-    "jobsieve[api,mcp]",
+    "jobsieve[api,mcp,ui]",
 ]
 
 [project.scripts]
@@ -61,12 +61,12 @@ jobsieve = "jobsieve.cli:main"
 job-scraper = "jobsieve.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/firaslamouchi21/jobsieve"
+Homepage = "https://jobsieve.flamouchi.com"
 Repository = "https://github.com/firaslamouchi21/jobsieve"
 Issues = "https://github.com/firaslamouchi21/jobsieve/issues"
 
 [tool.setuptools.package-data]
-jobsieve = ["data/*.json", "data/watchlists/*.json"]
+jobsieve = ["data/*.json", "data/watchlists/*.json", "data/*.svg", "data/.streamlit/*.toml"]
 
 [tool.setuptools.packages.find]
 where = ["."]

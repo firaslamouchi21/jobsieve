@@ -341,3 +341,58 @@ class TestStatedRequirementWithoutWorkMode:
 
     def test_no_requirement_and_no_location_stays_unknown(self):
         assert verdict(job(description="We are hiring.")) == "unknown"
+
+
+class TestAbroadWithNoStatedWorkMode:
+
+    def check(self, description, location="Boston, United States", **profile):
+        from jobsieve import eligibility
+        from jobsieve import profile as prof
+
+        job = {"title": "Engineer", "company": "A", "location": location, "description": description, "remote": None}
+        return eligibility.evaluate(job, prof.normalize({"home_country": "AE", "work_authorization": ["GCC"], **profile}))["verdict"]
+
+    def test_no_mention_of_remote_is_not_eligible(self):
+        assert self.check("Build hardware with the team in our lab.") == "not_eligible"
+
+    @pytest.mark.parametrize("text", ["Some remote days.", "Work from home possible.", "Hybrid team.", "Hire from anywhere.", "Télétravail partiel.", "عن بعد"])
+    def test_any_hint_of_remote_stays_unclear(self, text):
+        assert self.check(text) != "not_eligible"
+
+    def test_no_description_stays_unclear(self):
+        assert self.check("") == "unknown"
+
+    def test_a_relocation_country_stays_unclear(self):
+        assert self.check("Build hardware.", open_to_relocation=["US"]) == "unknown"
+
+    def test_a_place_only_in_the_title_stays_unclear(self):
+        from jobsieve import eligibility
+        from jobsieve import profile as prof
+
+        job = {"title": "Engineer, Boston", "company": "A", "location": "", "description": "Build hardware.", "remote": None}
+        assert eligibility.evaluate(job, prof.normalize({"home_country": "AE"}))["verdict"] == "unknown"
+
+    def test_where_the_user_can_work_is_eligible(self):
+        assert self.check("Build hardware.", location="Dubai, UAE") == "eligible"
+
+
+def test_place_first_cues_match_the_same_with_and_without_the_fast_path():
+    from jobsieve import eligibility
+
+    texts = ["US only. EU residents only, please.", "Open to U.S. only and EU only", "x" * 3000 + " Canada residency required " + "y" * 3000,
+             "only", "read-only access only for Germany only", "A" * 60 + " only only only"]
+    for text in texts:
+        for cue in eligibility.TAIL_ANCHORS:
+            fast = [(m.start(), m.group()) for m in eligibility.cue_matches(cue, text)]
+            assert fast == [(m.start(), m.group()) for m in cue.finditer(text)], (cue.pattern, text[:40])
+
+
+def test_long_descriptions_are_checked_quickly():
+    import time
+
+    from jobsieve import eligibility
+
+    start = time.perf_counter()
+    for _ in range(20):
+        eligibility.parse_text_restriction("We build things for people in many places, " * 400)
+    assert time.perf_counter() - start < 2

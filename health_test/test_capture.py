@@ -125,9 +125,9 @@ class TestUiLabel:
 
     def test_captured_label(self):
         pytest.importorskip("streamlit")
-        from jobsieve.app import job_line
+        from jobsieve.ui.components import source_label
 
-        assert "captured from bayt.com" in job_line({"company": "Acme", "source": "capture:bayt.com"})
+        assert source_label("capture:bayt.com") == "Captured from bayt.com"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")

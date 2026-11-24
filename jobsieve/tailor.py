@@ -26,12 +26,12 @@ class TailorError(Exception):
 
 def build_prompt(job: dict, cv_text: str, profile: dict) -> str:
     return (
-        "Help this candidate apply for the job below.\\n"
+        "Help this candidate apply for the job below.\n"
         "Rules: use only facts that appear in the CV. Do not invent employers, titles, degrees, tools, dates or numbers. "
-        "If the job asks for something the CV does not show, list it under keyword_gaps instead of claiming it.\\n"
-        f"CV:\\n{cv_text[:MAX_CV_CHARS]}\\n\\n"
-        f"Job: {job.get('title')} at {job.get('company')} ({job.get('location') or 'location not stated'})\\n"
-        f"{(job.get('description') or job.get('snippet') or '')[:MAX_JOB_CHARS]}\\n\\n"
+        "If the job asks for something the CV does not show, list it under keyword_gaps instead of claiming it.\n"
+        f"CV:\n{cv_text[:MAX_CV_CHARS]}\n\n"
+        f"Job: {job.get('title')} at {job.get('company')} ({job.get('location') or 'location not stated'})\n"
+        f"{(job.get('description') or job.get('snippet') or '')[:MAX_JOB_CHARS]}\n\n"
         "Return JSON with: cv_suggestions (3 to 6 specific rewrites or reorderings of existing CV lines that fit this job, "
         "each one sentence), keyword_gaps (skills or requirements in the job that the CV does not show), and "
         "cover_letter (under 250 words, plain and specific, no invented claims)."
@@ -93,4 +93,4 @@ def to_markdown(job: dict, output: dict) -> str:
     lines += ["## CV suggestions", *[f"- {x}" for x in output["cv_suggestions"]], "",
               "## Not shown in your CV", *[f"- {x}" for x in output["keyword_gaps"]], "",
               "## Cover letter draft", "", output["cover_letter"], ""]
-    return "\\n".join(lines)
+    return "\n".join(lines)
