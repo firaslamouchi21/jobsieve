@@ -15,35 +15,72 @@ EMAIL_PASS = os.environ.get("EMAIL_PASS", "")
 EMAIL_TO = os.environ.get("EMAIL_TO", "")
 MIN_SCORE_NOTIFY = int(os.environ.get("MIN_SCORE_NOTIFY") or "7")
 
-def last_check_path():
-    return os.path.join(os.environ.get("DATA_DIR", "./data"), "last_check.txt")
-
-
 def get_last_check():
-    try:
-        with open(last_check_path(), "r", encoding="utf-8") as f:
-            return f.read().strip()
-    except Exception:
-        return "1970-01-01T00:00:00"
+    from . import db
+
+    return db.get_meta("last_check", "1970-01-01T00:00:00")
 
 
 def set_last_check(ts: str):
-    path = last_check_path()
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(ts)
+    from . import db
+
+    db.set_meta("last_check", ts)
+
+
+def verdict_label(job: dict) -> str:
+    return {"eligible": "eligible", "unknown": "unclear", "not_eligible": "not eligible"}.get(job.get("eligibility") or "", "not checked yet")
+
+
+def render_markdown(jobs: list, limit: int = 10) -> str:
+    lines = [f"**{len(jobs)} new matches**", ""]
+    for j in jobs[:limit]:
+        place = f" · {j['location']}" if j.get("location") else ""
+        lines.append(f"- [{j['title']}]({j['link']}) · {j.get('company') or ''}{place} · score {j.get('score') or 0}/10 · {verdict_label(j)}")
+    if len(jobs) > limit:
+        lines.append(f"- and {len(jobs) - limit} more")
+    return "\n".join(lines)
+
+
+def webhook_payload(url: str, jobs: list) -> dict:
+    text = render_markdown(jobs, 5)
+    host = url.split("/")[2] if "://" in url else ""
+    if host.endswith("slack.com"):
+        return {"text": text}
+    if host.endswith("discord.com") or host.endswith("discordapp.com"):
+        return {"content": text[:1900]}
+    return {
+        "text": f"Found {len(jobs)} new matching jobs!",
+        "jobs": [
+            {"title": j["title"], "score": j["score"], "link": j["link"], "eligibility": j.get("eligibility")}
+            for j in jobs[:5]
+        ],
+    }
+
+
+def telegram_configured() -> bool:
+    return bool(os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"))
+
+
+def send_telegram(jobs: list):
+    if not telegram_configured():
+        return False
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendMessage",
+            json={"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": render_markdown(jobs).replace("**", ""), "disable_web_page_preview": True},
+            timeout=15,
+        )
+        response.raise_for_status()
+        return True
+    except Exception as error:
+        logger.warning("telegram notification failed: %s", type(error).__name__)
+        return False
 
 
 def send_webhook(jobs: list):
     if not NOTIFICATION_WEBHOOK:
         return False
-    payload = {
-        "text": f"Found {len(jobs)} new matching jobs!",
-        "jobs": [
-            {"title": j["title"], "score": j["score"], "link": j["link"]}
-            for j in jobs[:5]
-        ],
-    }
+    payload = webhook_payload(NOTIFICATION_WEBHOOK, jobs)
     try:
         response = requests.post(
             NOTIFICATION_WEBHOOK,
@@ -64,7 +101,7 @@ def send_email(jobs: list):
     subject = f"Job Alert: {len(jobs)} new matches found"
     body = "New job matches:\n\n"
     for j in jobs[:10]:
-        body += f"• {j['title']} (Score: {j['score']})\n  {j['link']}\n\n"
+        body += f"• {j['title']} (Score: {j['score']}, {verdict_label(j)})\n  {j['link']}\n\n"
     msg = MIMEText(body)
     msg["Subject"] = subject
     msg["From"] = EMAIL_USER
@@ -85,20 +122,22 @@ def email_configured() -> bool:
 
 
 def alerts_configured() -> bool:
-    return bool(NOTIFICATION_WEBHOOK) or email_configured()
+    return bool(NOTIFICATION_WEBHOOK) or email_configured() or telegram_configured()
+
+
+def pending_matches() -> list:
+    from . import db
+
+    return [j for j in db.get_jobs_since(get_last_check()) if (j.get("score") or 0) >= MIN_SCORE_NOTIFY]
 
 
 def check_and_notify():
-    from . import db
-
-    last = get_last_check()
-    jobs = db.get_jobs_since(last)
-    high_score = [j for j in jobs if (j.get("score") or 0) >= MIN_SCORE_NOTIFY]
+    high_score = pending_matches()
     checked_at = datetime.now(timezone.utc).isoformat()
     if not high_score:
         set_last_check(checked_at)
         return 0
-    delivered = [send_webhook(high_score), send_email(high_score)]
+    delivered = [send_webhook(high_score), send_email(high_score), send_telegram(high_score)]
     if any(delivered) or not alerts_configured():
         set_last_check(checked_at)
     return len(high_score)

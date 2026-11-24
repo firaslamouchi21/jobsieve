@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -11,7 +12,7 @@ from ..util import contains_term, data_dir, log_event, mock_enabled
 
 MAX_DESCRIPTION_CHARS = 20000
 HTTP_TIMEOUT_SECONDS = 30
-CLIENT_USER_AGENT = "jobsieve (+https://github.com/firaslamouchi21/Job-Scraper02)"
+CLIENT_USER_AGENT = "jobsieve (+https://github.com/firaslamouchi21/jobsieve)"
 
 
 class SourceError(Exception):
@@ -30,6 +31,7 @@ class JobRecord:
     posted_at: str = ""
     description: str = ""
     restrictions: str = ""
+    expires_at: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -81,6 +83,10 @@ def fetch_json(url: str):
     return response.json()
 
 
+def cache_key(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
+
+
 def cache_path(name: str) -> str:
     return os.path.join(data_dir(), "cache", f"{name}.json")
 
@@ -110,7 +116,7 @@ def write_cache(name: str, records: list[JobRecord]):
     os.replace(tmp_path, path)
 
 
-def load_feed(name: str, ttl_seconds: float, download) -> list[JobRecord]:
+def load_feed(name: str, ttl_seconds: float, download, on_removed=None) -> list[JobRecord]:
     cached = read_cache(name)
     if cached and time.time() - cached[0] < cache_ttl(ttl_seconds):
         return cached[1]
@@ -122,6 +128,11 @@ def load_feed(name: str, ttl_seconds: float, download) -> list[JobRecord]:
             return cached[1]
         raise SourceError(f"{name}: {type(error).__name__}: {str(error)[:120]}") from error
     write_cache(name, records)
+    if on_removed and cached and records:
+        try:
+            on_removed(cached[1], records)
+        except Exception as error:
+            log_event("closed_check_failed", source=name, error=str(error)[:120])
     return records
 
 

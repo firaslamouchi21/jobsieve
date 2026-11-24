@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jobsieve"
-version = "2.0.0.dev0"
+version = "2.0.0"
 description = "Sifts job listings down to the ones you are eligible for: free, local-first, with optional AI scoring"
 readme = "README.md"
 license = "Apache-2.0"
@@ -42,15 +42,18 @@ browser = [
 ai = [
     "anthropic>=1.0,<3",
 ]
+mcp = [
+    "mcp>=1.2",
+]
 all = [
-    "jobsieve[api,ui,browser,ai]",
+    "jobsieve[api,ui,browser,ai,mcp]",
 ]
 dev = [
     "pytest>=7.0.0",
     "httpx>=0.27",
     "black>=23.0.0",
     "ruff>=0.1.0",
-    "jobsieve[api]",
+    "jobsieve[api,mcp]",
 ]
 
 [project.scripts]
@@ -58,12 +61,12 @@ jobsieve = "jobsieve.cli:main"
 job-scraper = "jobsieve.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/firaslamouchi21/Job-Scraper02"
-Repository = "https://github.com/firaslamouchi21/Job-Scraper02"
-Issues = "https://github.com/firaslamouchi21/Job-Scraper02/issues"
+Homepage = "https://github.com/firaslamouchi21/jobsieve"
+Repository = "https://github.com/firaslamouchi21/jobsieve"
+Issues = "https://github.com/firaslamouchi21/jobsieve/issues"
 
 [tool.setuptools.package-data]
-jobsieve = ["data/*.json"]
+jobsieve = ["data/*.json", "data/watchlists/*.json"]
 
 [tool.setuptools.packages.find]
 where = ["."]

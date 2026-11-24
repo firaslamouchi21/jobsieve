@@ -84,10 +84,16 @@
     };
   }
 
+  function companyFromTitle(title) {
+    const match = /\s+at\s+([^|\u2013\u2014]+?)\s*(?:[|\u2013\u2014]|\s-\s|$)/i.exec(title);
+    return match ? match[1].trim() : "";
+  }
+
   function fromPage(page) {
+    const title = String(page.ogTitle || page.title || "").trim();
     return {
-      title: String(page.ogTitle || page.title || "").trim(),
-      company: String(page.siteName || "").trim(),
+      title,
+      company: companyFromTitle(title) || String(page.siteName || "").trim(),
       location: "",
       restrictions: "",
       remote: null,

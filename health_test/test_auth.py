@@ -71,7 +71,7 @@ class TestConfigEndpoint:
         monkeypatch.delenv("API_TOKEN", raising=False)
         r = client.get("/config")
         assert r.json() == {
-            "providers": {"groq": True, "anthropic": False, "gemini": False},
+            "providers": {"groq": True, "anthropic": False, "gemini": False, "openai": False},
             "auth_required": False,
         }
         assert "gsk-secret-value" not in r.text

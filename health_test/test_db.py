@@ -1,3 +1,4 @@
+import os
 import time
 
 from jobsieve import db
@@ -281,3 +282,69 @@ class TestMigrationToV2:
         assert all(j["source"] == "ddg" for j in jobs.values())
         assert db.upsert_job("x", "c", "https://example.com/j/2/", "a", "", 9, "") == ""
         assert db.count_jobs() == 2
+
+
+class TestUpgradeFromTheReleasedSchema:
+    """The exact table the published v0.3.0 created, filled before upgrading."""
+
+    V030_SCHEMA = (
+        "CREATE TABLE jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, job_hash TEXT UNIQUE, "
+        "title TEXT, company TEXT, link TEXT, site TEXT, snippet TEXT, score INTEGER, reasoning TEXT, created_at TEXT)"
+    )
+
+    def make_old_database(self):
+        import hashlib
+        import sqlite3
+
+        os.makedirs(os.environ["DATA_DIR"], exist_ok=True)
+        conn = sqlite3.connect(db.db_path())
+        conn.execute(self.V030_SCHEMA)
+        rows = [
+            ("Python Dev", "boards.greenhouse.io", "https://boards.greenhouse.io/acme/jobs/1?utm_source=x", 8, "AI said great"),
+            ("Python Dev", "boards.greenhouse.io", "https://boards.greenhouse.io/acme/jobs/1", 3, "duplicate of the first"),
+            ("Go Dev", "jobs.lever.co", "https://jobs.lever.co/acme/2", 5, "matched_keywords=1"),
+        ]
+        for title, site, link, score, reasoning in rows:
+            md5 = hashlib.md5(f"{title}|{site}|{link}".encode()).hexdigest()
+            conn.execute(
+                "INSERT INTO jobs (job_hash, title, company, link, site, snippet, score, reasoning, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (md5, title, "Acme", link, site, "snippet", score, reasoning, "2026-02-01T00:00:00+00:00"),
+            )
+        conn.commit()
+        conn.close()
+
+    def test_old_data_survives_and_every_new_feature_works_on_it(self):
+        self.make_old_database()
+        db.init()
+        jobs = db.list_jobs(limit=50, include_closed=True)
+        assert sorted(j["title"] for j in jobs) == ["Go Dev", "Python Dev"]
+        kept = next(j for j in jobs if j["title"] == "Python Dev")
+        assert kept["company"] == "Acme" and kept["snippet"] == "snippet"
+        assert kept["status"] == "new" and kept["freshness"]["label"] in ("old", "stale")
+        assert kept["eligibility"] is None and kept["also_seen"] == []
+        updated = db.set_status(kept["job_hash"], "saved", "note")
+        assert updated["status"] == "saved"
+        assert db.set_score(kept["job_hash"], 9, "agent: x")
+        db.mark_duplicates()
+        db.set_meta("k", "v")
+        assert db.get_meta("k") == "v"
+
+    def test_upgrading_twice_changes_nothing(self):
+        self.make_old_database()
+        db.init()
+        before = db.list_jobs(limit=50, include_closed=True)
+        db.init()
+        assert db.list_jobs(limit=50, include_closed=True) == before
+        conn = db.connect()
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(db.MIGRATIONS)
+        conn.close()
+
+    def test_a_new_run_after_upgrade_updates_the_old_row(self):
+        from jobsieve.sources.base import JobRecord
+
+        self.make_old_database()
+        db.init()
+        record = JobRecord(title="Go Dev", company="Acme", url="https://jobs.lever.co/acme/2", source="lever", location="Dubai")
+        db.upsert_record(record, 6, "matched_keywords=2")
+        assert len(db.list_jobs(limit=50, include_closed=True)) == 2

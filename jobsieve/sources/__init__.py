@@ -1,12 +1,27 @@
 from .arbeitnow import ArbeitnowSource
+from .boards import BoardsSource
 from .base import JobRecord, Source, SourceError
 from .ddg import DdgSource
+from .himalayas import HimalayasSource
+from .jobicy import JobicySource
 from .remoteok import RemoteOkSource
 from .remotive import RemotiveSource
+from .web import WebSource
+from .workingnomads import WorkingNomadsSource
 
 REGISTRY: dict[str, Source] = {
     source.name: source
-    for source in (DdgSource(), RemoteOkSource(), RemotiveSource(), ArbeitnowSource())
+    for source in (
+        DdgSource(),
+        RemoteOkSource(),
+        RemotiveSource(),
+        ArbeitnowSource(),
+        HimalayasSource(),
+        JobicySource(),
+        WorkingNomadsSource(),
+        BoardsSource(),
+        WebSource(),
+    )
 }
 
 DEFAULT_SOURCES = ("ddg",)

@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator
 
-from . import db, eligibility, places, scraper
+from . import db, eligibility, places, schedule, scraper, tailor, watchlist
 from .ai_service import AIService
 from .sources.base import JobRecord, html_to_text
 from . import profile as prof
@@ -20,6 +20,7 @@ from . import profile as prof
 @asynccontextmanager
 async def lifespan(_app):
     scraper.recover_from_crash()
+    schedule.start_from_environment()
     yield
 
 
@@ -60,11 +61,13 @@ def health():
 
 @api.get("/config")
 def config():
+    providers = {
+        name: bool((os.environ.get(f"{name.upper()}_API_KEY") or "").strip())
+        for name in ("groq", "anthropic", "gemini")
+    }
+    providers["openai"] = AIService("openai").enabled
     return {
-        "providers": {
-            name: bool((os.environ.get(f"{name.upper()}_API_KEY") or "").strip())
-            for name in ("groq", "anthropic", "gemini")
-        },
+        "providers": providers,
         "auth_required": bool((os.environ.get("API_TOKEN") or "").strip()),
     }
 
@@ -89,7 +92,7 @@ def status():
     }
 
 
-def jobs_for(limit: int, run: str | None, eligibility_filter: str | None = None):
+def jobs_for(limit: int, run: str | None, eligibility_filter: str | None = None, include_closed: bool = False, status: str | None = None):
     db.init()
     wanted = [x.strip() for x in (eligibility_filter or "").split(",") if x.strip()] or None
     run_id = None
@@ -97,12 +100,69 @@ def jobs_for(limit: int, run: str | None, eligibility_filter: str | None = None)
         run_id = db.latest_run_id()
         if not run_id:
             return []
-    return db.list_jobs(limit=limit, run_id=run_id, eligibility=wanted)
+    statuses = [x.strip() for x in (status or "").split(",") if x.strip()] or None
+    return db.list_jobs(limit=limit, run_id=run_id, eligibility=wanted, include_closed=include_closed, status=statuses)
 
 
 @api.get("/jobs")
-def jobs(limit: int = 200, run: str | None = None, eligibility: str | None = None):
-    return {"jobs": jobs_for(limit, run, eligibility)}
+def jobs(limit: int = 200, run: str | None = None, eligibility: str | None = None, include_closed: bool = False, status: str | None = None):
+    return {"jobs": jobs_for(limit, run, eligibility, include_closed, status)}
+
+
+class JobUpdate(BaseModel):
+    status: str | None = Field(default=None, max_length=20)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+@api.patch("/jobs/{job_hash}")
+def update_job(job_hash: str, body: JobUpdate):
+    db.init()
+    try:
+        return {"job": db.set_status(job_hash, body.status, body.notes)}
+    except db.JobNotFound as error:
+        raise HTTPException(status_code=404, detail="no such job") from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+class TailorRequest(BaseModel):
+    provider: str = Field(default="groq", max_length=20)
+    api_key: str = Field(default="", max_length=300)
+
+
+def tailor_keys(provider: str, api_key: str) -> dict:
+    env = {"groq": "GROQ_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY"}
+    return {provider: api_key.strip() or (os.environ.get(env.get(provider, "")) or "").strip()}
+
+
+@api.post("/jobs/{job_hash}/tailor")
+def tailor_job(job_hash: str, body: TailorRequest):
+    db.init()
+    provider = body.provider.strip().lower()
+    try:
+        return {"tailoring": tailor.tailor_job(job_hash, provider, tailor_keys(provider, body.api_key))}
+    except db.JobNotFound as error:
+        raise HTTPException(status_code=404, detail="no such job") from error
+    except tailor.TailorError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@api.get("/jobs/{job_hash}/tailor.md")
+def tailor_markdown(job_hash: str):
+    db.init()
+    job = db.get_job(job_hash)
+    if not job or not job.get("tailoring"):
+        raise HTTPException(status_code=404, detail="nothing saved for this job yet")
+    return Response(content=tailor.to_markdown(job, job["tailoring"]), media_type="text/markdown")
+
+
+@api.get("/stats")
+def stats(days: int = 7):
+    from datetime import datetime, timedelta, timezone
+
+    since = (datetime.now(timezone.utc) - timedelta(days=max(1, min(days, 365)))).isoformat()
+    db.init()
+    return {"days": days, "changes": db.event_counts(since)}
 
 
 @api.get("/export/json")
@@ -112,12 +172,7 @@ def export_json(limit: int = 200, run: str | None = None, eligibility: str | Non
 
 @api.get("/export/csv")
 def export_csv(limit: int = 200, run: str | None = None, eligibility: str | None = None):
-    rows = [
-        {**r, "eligibility_reasons": "; ".join(r["eligibility_reasons"])}
-        if isinstance(r.get("eligibility_reasons"), list)
-        else r
-        for r in jobs_for(limit, run, eligibility)
-    ]
+    rows = [db.csv_row(r) for r in jobs_for(limit, run, eligibility)]
     fieldnames = []
     for r in rows:
         for k in r.keys():
@@ -147,6 +202,78 @@ def put_profile(body: dict):
         raise HTTPException(status_code=422, detail=str(error)) from error
     db.init()
     return {"profile": saved, "reevaluated": eligibility.reevaluate_stored(saved)}
+
+
+class WatchRequest(BaseModel):
+    board: str = Field(max_length=30)
+    company: str = Field(max_length=64)
+    verify: bool = False
+
+
+@api.get("/watchlist")
+def get_watchlist():
+    try:
+        return {"companies": watchlist.load(), "boards": list(watchlist.BOARDS)}
+    except watchlist.WatchlistError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+@api.post("/watchlist")
+def add_to_watchlist(body: WatchRequest):
+    from .sources.boards import fetch_board
+
+    jobs_found = None
+    try:
+        if body.board.strip().lower() in watchlist.BOARDS and body.verify:
+            try:
+                jobs_found = len(fetch_board(body.board.strip().lower(), body.company.strip()))
+            except Exception as error:
+                raise HTTPException(
+                    status_code=422, detail=f"{body.board} has no board named '{body.company}' ({str(error)[:80]})"
+                ) from error
+        added = watchlist.add(body.board, body.company)
+    except watchlist.WatchlistError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {"added": added, "jobs_found": jobs_found}
+
+
+class CareerPageRequest(BaseModel):
+    url: str = Field(max_length=500)
+
+
+@api.post("/watchlist/from-page")
+def add_from_career_page(body: CareerPageRequest):
+    from . import careers
+
+    try:
+        found = careers.add_from_page(body.url)
+    except (careers.CareerPageError, watchlist.WatchlistError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {"companies": [{"board": b, "company": c, "added": a} for b, c, a in found]}
+
+
+class StarterRequest(BaseModel):
+    name: str = Field(max_length=40)
+
+
+@api.get("/watchlist/starters")
+def get_starters():
+    return {"lists": {n: {"description": d["description"], "companies": len(d["companies"])} for n, d in watchlist.starter_lists().items()}}
+
+
+@api.post("/watchlist/starter")
+def add_starter(body: StarterRequest):
+    try:
+        return {"added": watchlist.add_starter(body.name)}
+    except watchlist.WatchlistError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@api.delete("/watchlist/{board}/{company}")
+def remove_from_watchlist(board: str, company: str):
+    if not watchlist.remove(board, company):
+        raise HTTPException(status_code=404, detail="not on the watchlist")
+    return {"removed": True}
 
 
 class IngestRequest(BaseModel):
@@ -217,6 +344,7 @@ def ingest(body: IngestRequest):
             "profile_fingerprint": prof.fingerprint(profile),
         }
     created = db.upsert_record(record, score, reasoning, None, **extra)
+    db.mark_duplicates()
     return {
         "job_hash": db.record_hash(record),
         "is_new": bool(created),
@@ -248,6 +376,7 @@ def run(req: RunRequest):
         ),
         kwargs={"_lock_acquired": True, "sources": req.sources},
         daemon=True,
+        name="jobsieve-run",
     )
     t.start()
     return {"started": True}

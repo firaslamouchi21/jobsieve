@@ -124,6 +124,7 @@ class TestLocationFromPageText:
 class TestUiLabel:
 
     def test_captured_label(self):
+        pytest.importorskip("streamlit")
         from jobsieve.app import job_line
 
         assert "captured from bayt.com" in job_line({"company": "Acme", "source": "capture:bayt.com"})

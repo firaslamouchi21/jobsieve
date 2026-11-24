@@ -1,5 +1,6 @@
 import os
 import sys
+import threading
 
 os.environ.setdefault("MOCK_SEARCH", "true")
 os.environ.setdefault("USE_PLAYWRIGHT", "false")
@@ -17,3 +18,11 @@ def isolated_data_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.delenv("API_TOKEN", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def finish_background_runs():
+    yield
+    for thread in threading.enumerate():
+        if thread.name in ("jobsieve-run", "jobsieve-schedule"):
+            thread.join(timeout=20)

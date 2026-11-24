@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import threading
@@ -7,9 +8,9 @@ from datetime import datetime, timezone
 import requests
 from bs4 import BeautifulSoup
 
-from . import db, eligibility
+from . import db, discovery, eligibility
 from . import profile as prof
-from .ai_service import AIService
+from .ai_service import AIService, is_ai_failure
 from .sources import DEFAULT_SOURCES, SourceError, get_source
 from .sources.ddg import build_query, default_sites, normalize_site
 from .util import (
@@ -324,6 +325,28 @@ def wait_while_paused(done: int, total: int, added: int) -> bool:
     return stop_requested()
 
 
+AI_MAX_PER_RUN = int(os.environ.get("AI_MAX_PER_RUN") or "100")
+
+
+def ai_input_hash(text: str, cv_text: str, keywords: list[str], fingerprint: str) -> str:
+    material = json.dumps([text, cv_text, sorted(keywords), fingerprint], ensure_ascii=False)
+    return hashlib.sha1(material.encode("utf-8")).hexdigest()
+
+
+def default_source_names() -> list[str]:
+    from . import watchlist
+
+    names = list(DEFAULT_SOURCES)
+    try:
+        if watchlist.load():
+            names.append("boards")
+        if watchlist.load_pages():
+            names.append("web")
+    except watchlist.WatchlistError:
+        pass
+    return names
+
+
 def run_scrape(
     api_key: str,
     lite_mode: bool,
@@ -357,7 +380,7 @@ def run_scrape(
             log_event("run_invalid", reason="no_keywords")
             return
 
-        source_names = [str(n).strip().lower() for n in (sources or profile["sources"] or DEFAULT_SOURCES)]
+        source_names = [str(n).strip().lower() for n in (sources or profile["sources"] or default_source_names())]
         if sites is None:
             sites = read_lines(os.path.join(config_dir(), "sites.txt")) or profile["sites"]
         sites = [x for x in sites if normalize_site(x)]
@@ -380,6 +403,7 @@ def run_scrape(
             "groq": (os.environ.get("GROQ_API_KEY") or "").strip(),
             "anthropic": (os.environ.get("ANTHROPIC_API_KEY") or "").strip(),
             "gemini": (os.environ.get("GEMINI_API_KEY") or "").strip(),
+            "openai": (os.environ.get("OPENAI_API_KEY") or "").strip(),
         }
         for k, v in (api_keys or {}).items():
             keys[str(k).strip().lower()] = (v or "").strip()
@@ -399,6 +423,7 @@ def run_scrape(
         total = max(1, len(tasks))
         done = 0
         added = 0
+        ai_calls = 0
         source_errors = 0
         write_status("starting", 0, {"running": True, "added": 0, "paused": False})
 
@@ -433,6 +458,8 @@ def run_scrape(
                     source_errors += 1
                     log_event("source_failed", source=source.name, query=label, error=str(error)[:160])
                     records = []
+                if source.name == "ddg":
+                    discovery.learn(r.url for r in records)
                 for record in records:
                     if stop_requested():
                         break
@@ -442,13 +469,11 @@ def run_scrape(
                         if fetched:
                             text = fetched
                     scored_text = f"{record.title}. {text}"
-                    if use_ai:
-                        score, reasoning = ai.analyze(scored_text, cv_text, keywords, profile if use_profile else None)
-                    else:
-                        score, reasoning = ai.lite_score(scored_text, keywords, cv_text)
                     extra = {}
+                    verdict = None
                     if use_profile:
                         result = eligibility.evaluate(eligibility.job_from_record(record, text), profile)
+                        verdict = result["verdict"]
                         extra = {
                             "eligibility": result["verdict"],
                             "eligibility_reasons": result["reasons"],
@@ -460,6 +485,27 @@ def run_scrape(
                             "salary_currency": result["salary_currency"],
                             "profile_fingerprint": fingerprint,
                         }
+                    ai_hash = None
+                    ask_ai = use_ai and verdict != "not_eligible"
+                    if ask_ai:
+                        ai_hash = ai_input_hash(scored_text, cv_text, keywords, fingerprint)
+                        if db.ai_is_current(db.record_hash(record), ai_hash):
+                            db.touch_seen(db.record_hash(record), run_id)
+                            continue
+                        if ai_calls >= AI_MAX_PER_RUN:
+                            if ai_calls == AI_MAX_PER_RUN:
+                                log_event("ai_cap_reached", cap=AI_MAX_PER_RUN)
+                                ai_calls += 1
+                            ask_ai = False
+                    if ask_ai:
+                        ai_calls += 1
+                        score, reasoning = ai.analyze(scored_text, cv_text, keywords, profile if use_profile else None)
+                        if is_ai_failure(reasoning):
+                            ai_hash = None
+                    else:
+                        ai_hash = None
+                        score, reasoning = ai.lite_score(scored_text, keywords, cv_text)
+                    extra["ai_hash"] = ai_hash
                     h = db.upsert_record(record, score, reasoning, run_id, description=text, **extra)
                     if h:
                         added += 1

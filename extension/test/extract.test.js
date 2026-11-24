@@ -84,3 +84,10 @@ test("readDocument reads scripts, meta and main text from a document-like object
   assert.strictEqual(job.title, "Senior Data Engineer");
   assert.strictEqual(job.site, "jobs.example.com");
 });
+
+test("text fallback takes the company from an 'at Company' title", () => {
+  const job = core.extractJob({ url: "https://x.com/1", ogTitle: "Account Manager I at Careem | Greenhouse", text: "body" });
+  assert.strictEqual(job.company, "Careem");
+  const plain = core.extractJob({ url: "https://x.com/2", ogTitle: "Data Engineer", siteName: "GulfTalent", text: "body" });
+  assert.strictEqual(plain.company, "GulfTalent");
+});

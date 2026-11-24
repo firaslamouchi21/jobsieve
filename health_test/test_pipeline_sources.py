@@ -44,7 +44,7 @@ class TestStructuredSourcesInRun:
         status = wait_for(client, {"complete"})
         assert status["message"] == "complete"
         assert status["added"] == 6
-        jobs = client.get("/jobs").json()["jobs"]
+        jobs = db.list_jobs(include_duplicates=True)
         assert {j["source"] for j in jobs} == set(FEEDS)
         job = next(j for j in jobs if j["source"] == "remoteok")
         assert job["remote"] == 1

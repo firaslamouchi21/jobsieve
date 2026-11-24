@@ -18,11 +18,13 @@ MODEL_ENV_VARS = {
     "groq": "GROQ_MODEL",
     "gemini": "GEMINI_MODEL",
     "anthropic": "ANTHROPIC_MODEL",
+    "openai": "OPENAI_MODEL",
 }
 OPENAI_COMPATIBLE_URLS = {
     "groq": "https://api.groq.com/openai/v1/chat/completions",
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
 }
+OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
 AI_FAILED_PREFIX = "ai_failed:"
 CV_BONUS_CAP = 3
 CV_TERMS_PER_BONUS_POINT = 3
@@ -51,6 +53,15 @@ SCORE_SCHEMA = {
 
 class AIError(Exception):
     pass
+
+
+def openai_base_url() -> str:
+    return (os.environ.get("OPENAI_BASE_URL") or OPENAI_DEFAULT_BASE_URL).strip().rstrip("/")
+
+
+def is_local_base_url(url: str) -> bool:
+    host = url.split("://", 1)[-1].split("/", 1)[0].split(":")[0].lower()
+    return host in ("localhost", "127.0.0.1", "::1", "host.docker.internal") or host.endswith(".local")
 
 
 def model_for(provider: str) -> str:
@@ -99,6 +110,7 @@ class AIService:
             "groq": "",
             "anthropic": "",
             "gemini": "",
+            "openai": (os.environ.get("OPENAI_API_KEY") or "").strip(),
         }
         for k, v in (api_keys or {}).items():
             self.api_keys[str(k).strip().lower()] = (v or "").strip()
@@ -108,6 +120,9 @@ class AIService:
 
     @property
     def enabled(self) -> bool:
+        if self.provider == "openai":
+            local = is_local_base_url(openai_base_url())
+            return bool(self.model) and (local or bool(self.api_keys["openai"]))
         return self.provider in DEFAULT_MODELS and bool(self.api_keys.get(self.provider))
 
     def analyze(self, text: str, cv_text: str, keywords: list[str], profile: dict | None = None):
@@ -133,23 +148,29 @@ class AIService:
         score, lite_reasoning = self.lite_score(text, keywords, cv_text)
         return score, f"{AI_FAILED_PREFIX} {reason} | {lite_reasoning}"
 
-    def complete(self, prompt: str) -> str:
+    def complete(self, prompt: str, schema: dict | None = None) -> str:
         if self.provider == "anthropic":
-            return self.complete_anthropic(prompt)
+            return self.complete_anthropic(prompt, schema or SCORE_SCHEMA)
         return self.complete_openai_compatible(prompt)
 
     def complete_openai_compatible(self, prompt: str) -> str:
-        response = requests.post(
-            OPENAI_COMPATIBLE_URLS[self.provider],
-            headers={"Authorization": f"Bearer {self.api_keys[self.provider]}"},
-            json={
-                "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.1,
-                "response_format": {"type": "json_object"},
-            },
-            timeout=AI_TIMEOUT_SECONDS,
-        )
+        if self.provider == "openai":
+            url = f"{openai_base_url()}/chat/completions"
+            key = self.api_keys["openai"]
+            headers = {"Authorization": f"Bearer {key}"} if key else {}
+        else:
+            url = OPENAI_COMPATIBLE_URLS[self.provider]
+            headers = {"Authorization": f"Bearer {self.api_keys[self.provider]}"}
+        body = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "response_format": {"type": "json_object"},
+        }
+        response = requests.post(url, headers=headers, json=body, timeout=AI_TIMEOUT_SECONDS)
+        if response.status_code == 400 and self.provider == "openai":
+            body.pop("response_format")
+            response = requests.post(url, headers=headers, json=body, timeout=AI_TIMEOUT_SECONDS)
         response.raise_for_status()
         choices = response.json().get("choices") or []
         if not choices:
@@ -167,12 +188,12 @@ class AIService:
             )
         return self._anthropic
 
-    def complete_anthropic(self, prompt: str) -> str:
+    def complete_anthropic(self, prompt: str, schema: dict = SCORE_SCHEMA) -> str:
         try:
             import anthropic
         except ImportError as error:
             raise AIError("anthropic package not installed; pip install jobsieve[ai]") from error
-        output_config = {"format": {"type": "json_schema", "schema": SCORE_SCHEMA}}
+        output_config = {"format": {"type": "json_schema", "schema": schema}}
         effort = os.environ.get("ANTHROPIC_EFFORT", "low").strip().lower()
         if effort:
             output_config["effort"] = effort
@@ -181,7 +202,7 @@ class AIService:
             # and which counts against the cap before any answer text is written.
             response = self.anthropic_client().messages.create(
                 model=self.model,
-                max_tokens=2048,
+                max_tokens=4096,
                 output_config=output_config,
                 messages=[{"role": "user", "content": prompt}],
             )

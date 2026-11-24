@@ -5,7 +5,8 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-from .util import normalize_url
+from . import duplicates, freshness
+from .util import log_event, normalize_url
 
 
 def data_dir() -> str:
@@ -85,7 +86,161 @@ def migrate_to_v3(cur):
     cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_eligibility ON jobs(eligibility)")
 
 
-MIGRATIONS = [migrate_to_v1, migrate_to_v2, migrate_to_v3]
+def migrate_to_v4(cur):
+    existing = table_columns(cur, "jobs")
+    for column in ("duplicate_of", "also_seen"):
+        if column not in existing:
+            cur.execute(f"ALTER TABLE jobs ADD COLUMN {column} TEXT")
+
+
+def migrate_to_v5(cur):
+    existing = table_columns(cur, "jobs")
+    for column in ("expires_at", "closed_at"):
+        if column not in existing:
+            cur.execute(f"ALTER TABLE jobs ADD COLUMN {column} TEXT")
+    if "repost_count" not in existing:
+        cur.execute("ALTER TABLE jobs ADD COLUMN repost_count INTEGER DEFAULT 0")
+
+
+def migrate_to_v6(cur):
+    existing = table_columns(cur, "jobs")
+    if "status" not in existing:
+        cur.execute("ALTER TABLE jobs ADD COLUMN status TEXT DEFAULT 'new'")
+    for column in ("notes", "status_at"):
+        if column not in existing:
+            cur.execute(f"ALTER TABLE jobs ADD COLUMN {column} TEXT")
+    cur.execute("UPDATE jobs SET status = 'new' WHERE status IS NULL")
+    cur.execute(
+        "CREATE TABLE IF NOT EXISTS events ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, job_hash TEXT, kind TEXT, detail TEXT, at TEXT)"
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_events_kind_at ON events(kind, at)")
+
+
+def migrate_to_v7(cur):
+    cur.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+
+
+def migrate_to_v8(cur):
+    existing = table_columns(cur, "jobs")
+    for column in ("ai_hash", "tailoring"):
+        if column not in existing:
+            cur.execute(f"ALTER TABLE jobs ADD COLUMN {column} TEXT")
+
+
+MIGRATIONS = [
+    migrate_to_v1, migrate_to_v2, migrate_to_v3, migrate_to_v4, migrate_to_v5, migrate_to_v6, migrate_to_v7,
+    migrate_to_v8,
+]
+
+
+def get_meta(key: str, default: str = "") -> str:
+    conn = connect()
+    try:
+        row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    except sqlite3.OperationalError:
+        return default
+    finally:
+        conn.close()
+    return row["value"] if row else default
+
+
+def set_meta(key: str, value: str) -> None:
+    init()
+    conn = connect()
+    conn.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
+    conn.commit()
+    conn.close()
+
+STATUSES = ("new", "saved", "applied", "interviewing", "offer", "rejected", "hidden")
+MAX_NOTE_CHARS = 2000
+
+
+class JobNotFound(LookupError):
+    pass
+
+
+def set_status(job_hash_value: str, status=None, notes=None) -> dict:
+    if status is not None and status not in STATUSES:
+        raise ValueError(f"status must be one of: {', '.join(STATUSES)}")
+    if notes is not None and len(str(notes)) > MAX_NOTE_CHARS:
+        raise ValueError(f"notes are limited to {MAX_NOTE_CHARS} characters")
+    conn = connect()
+    row = conn.execute("SELECT status FROM jobs WHERE job_hash = ?", (job_hash_value,)).fetchone()
+    if row is None:
+        conn.close()
+        raise JobNotFound(job_hash_value)
+    now = now_iso()
+    if status is not None and status != (row["status"] or "new"):
+        conn.execute("UPDATE jobs SET status = ?, status_at = ? WHERE job_hash = ?", (status, now, job_hash_value))
+        conn.execute(
+            "INSERT INTO events (job_hash, kind, detail, at) VALUES (?, 'status', ?, ?)",
+            (job_hash_value, status, now),
+        )
+    if notes is not None:
+        conn.execute("UPDATE jobs SET notes = ? WHERE job_hash = ?", (str(notes), job_hash_value))
+    conn.commit()
+    job = decode_job(conn.execute("SELECT * FROM jobs WHERE job_hash = ?", (job_hash_value,)).fetchone())
+    conn.close()
+    return job
+
+
+def count_new_since(timestamp: str) -> int:
+    conn = connect()
+    n = conn.execute(
+        "SELECT COUNT(*) AS n FROM jobs WHERE created_at > ? AND eligibility = 'eligible' "
+        "AND COALESCE(status, 'new') = 'new' AND duplicate_of IS NULL AND closed_at IS NULL",
+        (timestamp,),
+    ).fetchone()["n"]
+    conn.close()
+    return int(n)
+
+
+def ai_is_current(job_hash_value: str, ai_hash: str) -> bool:
+    conn = connect()
+    row = conn.execute("SELECT reasoning, ai_hash FROM jobs WHERE job_hash = ?", (job_hash_value,)).fetchone()
+    conn.close()
+    return bool(row and row["ai_hash"] == ai_hash and is_ai_scored(row["reasoning"]))
+
+
+def touch_seen(job_hash_value: str, run_id) -> None:
+    conn = connect()
+    conn.execute("UPDATE jobs SET run_id = ?, last_seen = ?, closed_at = NULL WHERE job_hash = ?", (run_id, now_iso(), job_hash_value))
+    conn.commit()
+    conn.close()
+
+
+def save_tailoring(job_hash_value: str, content: dict) -> None:
+    conn = connect()
+    conn.execute("UPDATE jobs SET tailoring = ? WHERE job_hash = ?", (json.dumps(content, ensure_ascii=False), job_hash_value))
+    conn.commit()
+    conn.close()
+
+
+def get_job(job_hash_value: str):
+    conn = connect()
+    row = conn.execute("SELECT * FROM jobs WHERE job_hash = ?", (job_hash_value,)).fetchone()
+    conn.close()
+    return decode_job(row) if row else None
+
+
+def find_hashes(prefix: str) -> list[str]:
+    prefix = "".join(c for c in str(prefix) if c.isalnum())
+    if len(prefix) < 6:
+        return []
+    conn = connect()
+    rows = conn.execute("SELECT job_hash FROM jobs WHERE job_hash LIKE ? LIMIT 2", (prefix + "%",)).fetchall()
+    conn.close()
+    return [r["job_hash"] for r in rows]
+
+
+def event_counts(since: str) -> dict:
+    conn = connect()
+    rows = conn.execute(
+        "SELECT detail, COUNT(*) AS n FROM events WHERE kind = 'status' AND at >= ? GROUP BY detail", (since,)
+    ).fetchall()
+    conn.close()
+    return {r["detail"]: r["n"] for r in rows}
 
 
 def init():
@@ -111,6 +266,9 @@ def init():
 
 AI_FAILED_PREFIX = "ai_failed:"
 LITE_PREFIX = "matched_keywords="
+
+
+AGENT_PREFIX = "agent:"
 
 
 def is_ai_scored(reasoning) -> bool:
@@ -145,6 +303,10 @@ def finish_run(run_id: str):
     )
     conn.commit()
     conn.close()
+    try:
+        mark_duplicates()
+    except sqlite3.Error as error:
+        log_event("duplicate_check_failed", error=str(error)[:120])
 
 
 def latest_run_id() -> str | None:
@@ -160,6 +322,7 @@ DETAIL_FIELDS = (
     "source", "location", "remote", "salary", "posted_at", "description",
     "restrictions", "eligibility", "eligibility_reasons", "work_mode", "seniority",
     "sponsorship", "salary_min", "salary_max", "salary_currency", "profile_fingerprint",
+    "expires_at", "ai_hash",
 )
 
 
@@ -173,6 +336,37 @@ def prepare_details(details: dict) -> dict:
     if isinstance(values["eligibility_reasons"], (list, tuple)):
         values["eligibility_reasons"] = json.dumps(list(values["eligibility_reasons"]), ensure_ascii=False)
     return values
+
+
+def republished(old, new) -> bool:
+    try:
+        before = datetime.fromisoformat(str(old).replace("Z", "+00:00"))
+        after = datetime.fromisoformat(str(new).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if before.tzinfo is None:
+        before = before.replace(tzinfo=timezone.utc)
+    if after.tzinfo is None:
+        after = after.replace(tzinfo=timezone.utc)
+    return (after - before).total_seconds() > 86400
+
+
+def mark_closed(links) -> int:
+    links = [l for l in links if l]
+    if not links:
+        return 0
+    conn = connect()
+    count = 0
+    for start in range(0, len(links), 500):
+        chunk = links[start:start + 500]
+        cur = conn.execute(
+            f"UPDATE jobs SET closed_at = ? WHERE closed_at IS NULL AND link IN ({', '.join('?' for _ in chunk)})",
+            (now_iso(), *chunk),
+        )
+        count += cur.rowcount
+    conn.commit()
+    conn.close()
+    return count
 
 
 def upsert_job(title, company, link, site, snippet, score, reasoning, run_id=None, **details):
@@ -197,12 +391,14 @@ def upsert_job(title, company, link, site, snippet, score, reasoning, run_id=Non
     inserted = bool(cur.rowcount)
     if not inserted:
         existing = cur.execute(
-            "SELECT reasoning FROM jobs WHERE job_hash = ?", (h,)
+            "SELECT reasoning, posted_at FROM jobs WHERE job_hash = ?", (h,)
         ).fetchone()
-        keep_previous_score = (
-            existing is not None
-            and is_ai_scored(existing["reasoning"])
-            and str(reasoning or "").startswith(AI_FAILED_PREFIX)
+        if existing is not None and republished(existing["posted_at"], values["posted_at"]):
+            cur.execute("UPDATE jobs SET repost_count = COALESCE(repost_count, 0) + 1 WHERE job_hash = ?", (h,))
+        cur.execute("UPDATE jobs SET closed_at = NULL WHERE job_hash = ?", (h,))
+        keep_previous_score = existing is not None and (
+            (is_ai_scored(existing["reasoning"]) and str(reasoning or "").startswith(AI_FAILED_PREFIX))
+            or (str(existing["reasoning"] or "").startswith(AGENT_PREFIX) and not str(reasoning or "").startswith(AGENT_PREFIX))
         )
         detail_sql = ", ".join(f"{f} = COALESCE(?, {f})" for f in DETAIL_FIELDS)
         detail_values = [values[f] for f in DETAIL_FIELDS]
@@ -245,6 +441,7 @@ def upsert_record(record, score, reasoning, run_id=None, description=None, **ext
         posted_at=record.posted_at or None,
         description=(description if description is not None else record.description) or None,
         restrictions=record.restrictions or None,
+        expires_at=record.expires_at or None,
         **extra,
     )
 
@@ -268,6 +465,15 @@ def set_score(job_hash_value: str, score: int, reasoning: str) -> bool:
 
 def decode_job(row) -> dict:
     job = dict(row)
+    try:
+        job["also_seen"] = json.loads(job.get("also_seen") or "[]")
+    except ValueError:
+        job["also_seen"] = []
+    job["freshness"] = freshness.assess(job)
+    try:
+        job["tailoring"] = json.loads(job["tailoring"]) if job.get("tailoring") else None
+    except ValueError:
+        job["tailoring"] = None
     reasons = job.get("eligibility_reasons")
     if reasons:
         try:
@@ -277,12 +483,72 @@ def decode_job(row) -> dict:
     return job
 
 
-def list_jobs(limit=200, run_id=None, eligibility=None):
+def mark_duplicates():
+    conn = connect()
+    rows = conn.execute(
+        "SELECT job_hash, company, title, location, source, link, description, updated_at FROM jobs"
+    ).fetchall()
+    groups: dict[str, list] = {}
+    for row in rows:
+        key = duplicates.duplicate_key(row["company"], row["title"], row["location"], row["source"])
+        if key:
+            groups.setdefault(key, []).append(row)
+    marks = {row["job_hash"]: (None, None) for row in rows}
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        ranked = sorted(group, key=lambda r: duplicates.preference(r["source"], r["description"], r["updated_at"]))
+        best, rest = ranked[0], ranked[1:]
+        marks[best["job_hash"]] = (None, json.dumps([{"source": r["source"], "url": r["link"]} for r in rest]))
+        for r in rest:
+            marks[r["job_hash"]] = (best["job_hash"], None)
+    conn.executemany(
+        "UPDATE jobs SET duplicate_of = ?, also_seen = ? WHERE job_hash = ?",
+        [(dup, seen, h) for h, (dup, seen) in marks.items()],
+    )
+    conn.commit()
+    conn.close()
+
+
+def spreadsheet_safe(value):
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
+def csv_row(job: dict) -> dict:
+    row = dict(job)
+    if isinstance(row.get("eligibility_reasons"), list):
+        row["eligibility_reasons"] = "; ".join(row["eligibility_reasons"])
+    state = row.pop("freshness", None)
+    if isinstance(state, dict):
+        row["freshness"] = state["label"]
+        row["freshness_facts"] = "; ".join(state["facts"])
+    if isinstance(row.get("also_seen"), list):
+        row["also_seen"] = "; ".join(f"{o.get('source')} {o.get('url')}" for o in row["also_seen"])
+    return {key: spreadsheet_safe(value) for key, value in row.items()}
+
+
+def list_jobs(limit=200, run_id=None, eligibility=None, include_duplicates=False, include_closed=False, status=None):
     limit = max(1, min(int(limit), MAX_LIST_LIMIT))
     where, params = [], []
+    if not include_duplicates:
+        where.append("duplicate_of IS NULL")
+    if status:
+        wanted_status = [x for x in status if x in STATUSES]
+        where.append(f"COALESCE(status, 'new') IN ({', '.join('?' for _ in wanted_status) or 'NULL'})")
+        params.extend(wanted_status)
+    else:
+        where.append("COALESCE(status, 'new') != 'hidden'")
+    if not include_closed:
+        where.append("closed_at IS NULL AND (expires_at IS NULL OR expires_at > ?)")
+        params.append(now_iso())
     if run_id:
-        where.append("(run_id = ? OR source LIKE 'capture:%')")
-        params.append(run_id)
+        where.append(
+            "(run_id = ? OR source LIKE 'capture:%' OR job_hash IN "
+            "(SELECT duplicate_of FROM jobs WHERE run_id = ? AND duplicate_of IS NOT NULL))"
+        )
+        params.extend([run_id, run_id])
     if eligibility:
         wanted = [e for e in eligibility if e in ("eligible", "not_eligible", "unknown", "unchecked")]
         marks = ", ".join("?" for e in wanted if e != "unchecked")
@@ -296,7 +562,10 @@ def list_jobs(limit=200, run_id=None, eligibility=None):
     sql = "SELECT * FROM jobs"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY score DESC, created_at DESC LIMIT ?"
+    sql += (
+        " ORDER BY CASE eligibility WHEN 'eligible' THEN 0 WHEN 'unknown' THEN 1 WHEN 'not_eligible' THEN 3 ELSE 2 END,"
+        " score DESC, COALESCE(posted_at, created_at) DESC LIMIT ?"
+    )
     conn = connect()
     cur = conn.cursor()
     cur.execute(sql, (*params, limit))
@@ -355,7 +624,9 @@ def get_jobs_since(timestamp: str):
     conn = connect()
     cur = conn.cursor()
     cur.execute(
-        "SELECT * FROM jobs WHERE created_at > ? ORDER BY score DESC",
+        "SELECT * FROM jobs WHERE created_at > ? AND COALESCE(status, 'new') IN ('new', 'saved') "
+        "AND duplicate_of IS NULL AND closed_at IS NULL AND COALESCE(eligibility, '') != 'not_eligible' "
+        "ORDER BY score DESC",
         (timestamp,),
     )
     rows = cur.fetchall()

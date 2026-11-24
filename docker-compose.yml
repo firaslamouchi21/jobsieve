@@ -1,6 +1,6 @@
 services:
   agent-ui:
-    image: ghcr.io/firaslamouchi21/job-scraper02/ui:latest
+    image: ghcr.io/firaslamouchi21/jobsieve/ui:latest
     build:
       context: .
       dockerfile: Dockerfile.ui
@@ -19,7 +19,7 @@ services:
       - scraper
 
   scraper:
-    image: ghcr.io/firaslamouchi21/job-scraper02/scraper:latest
+    image: ghcr.io/firaslamouchi21/jobsieve/scraper:latest
     build:
       context: .
       dockerfile: Dockerfile.scraper
@@ -34,6 +34,10 @@ services:
       - GROQ_MODEL=${GROQ_MODEL:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - AI_MAX_PER_RUN=${AI_MAX_PER_RUN:-100}
       - DEFAULT_SITES=${DEFAULT_SITES:-}
       - MOCK_SEARCH=${MOCK_SEARCH:-}
       - USE_PLAYWRIGHT=${USE_PLAYWRIGHT:-true}
@@ -48,6 +52,10 @@ services:
       - EMAIL_USER=${EMAIL_USER:-}
       - EMAIL_PASS=${EMAIL_PASS:-}
       - EMAIL_TO=${EMAIL_TO:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - RUN_EVERY_HOURS=${RUN_EVERY_HOURS:-}
+      - SCHEDULE_PROVIDER=${SCHEDULE_PROVIDER:-groq}
     volumes:
       - ./data:/data
 

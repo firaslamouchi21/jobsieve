@@ -13,8 +13,11 @@ from jobsieve.sources import (
     base,
     ddg,
     get_source,
+    himalayas,
+    jobicy,
     remoteok,
     remotive,
+    workingnomads,
 )
 from jobsieve.util import normalize_url
 
@@ -101,6 +104,50 @@ class TestParsers:
         assert record.description == "Python and Go"
         assert record.source == "remotive"
 
+    def test_himalayas_keeps_stated_location_restrictions(self):
+        payload = {"jobs": [
+            {"title": "Accountant", "companyName": "Acme", "guid": "https://himalayas.app/j/1",
+             "locationRestrictions": ["United States", "Canada"], "minSalary": 90000, "maxSalary": 110000,
+             "currency": "USD", "salaryPeriod": "annual", "pubDate": 1795436885, "description": "<p>Books</p>"},
+            {"title": "Open role", "companyName": "Acme", "guid": "https://himalayas.app/j/2", "locationRestrictions": []},
+        ]}
+        first, second = himalayas.parse(payload)
+        assert first.restrictions == "United States, Canada"
+        assert first.salary == "USD 90000-110000/year"
+        assert first.posted_at.startswith("2026-")
+        assert first.description == "Books"
+        assert second.restrictions == "" and second.remote is True
+
+    def test_jobicy_normalizes_geo_and_salary(self):
+        payload = {"jobs": [{"jobTitle": "Sales &amp; Ops", "companyName": "Cribl", "url": "https://jobicy.com/jobs/1",
+                             "jobGeo": "Germany,  Netherlands,  UK", "salaryMin": 100000, "salaryMax": 130000,
+                             "salaryCurrency": "EUR", "salaryPeriod": "yearly", "pubDate": "2026-11-23T09:13:41+00:00",
+                             "jobDescription": "<p>Sell</p>"}]}
+        record = jobicy.parse(payload)[0]
+        assert record.title == "Sales & Ops"
+        assert record.restrictions == "Germany, Netherlands, UK"
+        assert record.salary == "EUR 100000-130000/year"
+
+    def test_workingnomads_normalizes(self):
+        payload = [{"url": "https://www.workingnomads.com/job/go/1/", "title": "Teacher", "company_name": "Polly",
+                    "location": "North America", "pub_date": "2026-11-23T04:14:27-05:00", "description": "<p>Teach</p>"}]
+        record = workingnomads.parse(payload)[0]
+        assert record.restrictions == "North America"
+        assert record.source == "workingnomads" and record.description == "Teach"
+
+    def test_himalayas_follows_cursor_and_stops(self, monkeypatch):
+        monkeypatch.setenv("HIMALAYAS_PAGES", "3")
+        monkeypatch.setattr(himalayas, "sleep_delay", lambda: None)
+        calls = []
+
+        def fake(url):
+            calls.append(url)
+            return {"jobs": [{"title": f"J{len(calls)}", "guid": f"https://h/{len(calls)}"}], "nextCursor": f"c{len(calls)}"}
+
+        monkeypatch.setattr(base, "fetch_json", fake)
+        records = himalayas.HimalayasSource().download()
+        assert len(records) == 3 and "cursor=c2" in calls[2] and "cursor" not in calls[0]
+
     def test_arbeitnow_normalizes_epoch_and_remote_flag(self):
         record = arbeitnow.parse(ARBEITNOW_PAYLOAD)[0]
         assert record.remote is False
@@ -108,7 +155,7 @@ class TestParsers:
         assert record.posted_at.startswith("2026-")
         assert record.source == "arbeitnow"
 
-    @pytest.mark.parametrize("parser", [remoteok.parse, remotive.parse, arbeitnow.parse])
+    @pytest.mark.parametrize("parser", [remoteok.parse, remotive.parse, arbeitnow.parse, himalayas.parse, jobicy.parse, workingnomads.parse])
     def test_parsers_tolerate_garbage(self, parser):
         assert parser(None) == []
         assert parser({"unexpected": True}) == []
@@ -205,7 +252,7 @@ class TestFetchAndCache:
             raise AssertionError("network used in mock mode")
 
         monkeypatch.setattr(base, "fetch_json", boom)
-        for name in ("remoteok", "remotive", "arbeitnow"):
+        for name in ("remoteok", "remotive", "arbeitnow", "himalayas", "jobicy", "workingnomads"):
             records = get_source(name).fetch(["python"])
             assert len(records) == 2 and records[0].source == name
         assert not os.path.exists(os.path.join(os.environ["DATA_DIR"], "cache"))
@@ -214,7 +261,9 @@ class TestFetchAndCache:
 class TestRegistry:
 
     def test_all_sources_registered(self):
-        assert available_sources() == ["ddg", "remoteok", "remotive", "arbeitnow"]
+        assert available_sources() == [
+            "ddg", "remoteok", "remotive", "arbeitnow", "himalayas", "jobicy", "workingnomads", "boards", "web"
+        ]
 
     def test_unknown_source_lists_choices(self):
         with pytest.raises(SourceError, match="available: ddg"):
@@ -224,7 +273,7 @@ class TestRegistry:
         assert get_source(" RemoteOK ") is REGISTRY["remoteok"]
 
     def test_feed_sources_have_attribution(self):
-        for name in ("remoteok", "remotive", "arbeitnow"):
+        for name in ("remoteok", "remotive", "arbeitnow", "himalayas", "jobicy", "workingnomads"):
             assert REGISTRY[name].attribution_url.startswith("https://")
 
 
