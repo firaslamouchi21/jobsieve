@@ -2,10 +2,10 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "DOCKERFILE",
-    "dockerfilePath": "Dockerfile.ui"
+    "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "startCommand": "python -m streamlit run job_scraper/app.py --server.port $PORT --server.address 0.0.0.0",
+    "startCommand": "/app/start_combined.sh",
     "healthcheckPath": "/_stcore/health",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 5

@@ -1,0 +1,13 @@
+{
+  "description": "Employers hiring in the Gulf and MENA whose public job boards answered when this list was made (23 Nov 2026). A starting point, not a complete list: add your own with 'jobsieve watch add'.",
+  "companies": [
+    {"board": "greenhouse", "slug": "careem", "note": "Dubai"},
+    {"board": "greenhouse", "slug": "lucidmotors", "note": "Saudi Arabia and elsewhere"},
+    {"board": "ashby", "slug": "qlub", "note": "UAE fintech"},
+    {"board": "ashby", "slug": "leantech", "note": "Saudi fintech"},
+    {"board": "lever", "slug": "econstruct", "note": "UAE"},
+    {"board": "lever", "slug": "Yassir", "note": "Algeria-based, MENA"},
+    {"board": "smartrecruiters", "slug": "GhobashGroup", "note": "UAE; board shows only its first 100 jobs"},
+    {"board": "smartrecruiters", "slug": "DeliveryHero", "note": "talabat and others; first 100 jobs"}
+  ]
+}

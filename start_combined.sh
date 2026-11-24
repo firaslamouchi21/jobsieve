@@ -3,7 +3,7 @@ set -e
 
 export SCRAPER_URL="${SCRAPER_URL:-http://localhost:8000}"
 
-python -m uvicorn job_scraper.scraper:api --host 0.0.0.0 --port 8000 &
+python -m uvicorn jobsieve.api:api --host "${API_HOST:-0.0.0.0}" --port 8000 &
 SCRAPER_PID=$!
 
 cleanup() {
@@ -11,4 +11,4 @@ cleanup() {
 }
 trap cleanup TERM INT EXIT
 
-exec python -m streamlit run job_scraper/app.py --server.port="${PORT:-8501}" --server.address=0.0.0.0
+exec python -m streamlit run jobsieve/app.py --server.port="${PORT:-8501}" --server.address=0.0.0.0

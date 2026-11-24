@@ -3,6 +3,48 @@ on:
   push:
   pull_request:
 jobs:
+  core:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: tests
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          python -m pytest health_test/ -v --tb=short
+      - name: light-install
+        run: |
+          python -m venv /tmp/light
+          /tmp/light/bin/pip install --upgrade pip
+          /tmp/light/bin/pip install .
+          for mod in fastapi uvicorn streamlit playwright anthropic mcp; do
+            if /tmp/light/bin/python -c "import $mod" 2>/dev/null; then
+              echo "$mod must not be installed with the base package"
+              exit 1
+            fi
+          done
+          export MOCK_SEARCH=true DATA_DIR=/tmp/light-data
+          /tmp/light/bin/jobsieve sources
+          /tmp/light/bin/jobsieve fetch --source remoteok remotive arbeitnow --keyword python --json \
+            | /tmp/light/bin/python -c "import json,sys; rows=json.load(sys.stdin); assert len(rows)==6, rows"
+
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: extension tests
+        run: node --test extension/test/extract.test.js
+
   build-and-check:
     runs-on: ubuntu-latest
     steps:
@@ -13,8 +55,8 @@ jobs:
       - name: install
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest build
+          pip install ".[all,dev]"
+          pip install build
       - name: python-compile
         run: |
           python -m compileall -q .
@@ -23,7 +65,7 @@ jobs:
           python -m pytest health_test/ -v --tb=short
       - name: cli-smoke
         run: |
-          python -m job_scraper.cli export --format json --limit 1
+          python -m jobsieve.cli export --format json --limit 1
       - name: package-build
         run: |
           python -m build --wheel
@@ -48,19 +90,22 @@ jobs:
           if leaked:
               print(f"flat top-level modules leaked into {wheel}: {leaked}")
               sys.exit(1)
-          if not any(n.startswith("job_scraper/") for n in names):
-              print(f"job_scraper package missing from {wheel}")
+          if not any(n.startswith("jobsieve/") for n in names):
+              print(f"jobsieve package missing from {wheel}")
               sys.exit(1)
-          print(f"OK: {wheel} only exposes job_scraper/*")
+          if not any(n.startswith("jobsieve/sources/") for n in names):
+              print(f"jobsieve.sources missing from {wheel}")
+              sys.exit(1)
+          print(f"OK: {wheel} only exposes jobsieve/*")
           PY
       - name: console-script-check
         run: |
           pip install --no-deps -e .
-          job-scraper export --format json --limit 1
+          jobsieve export --format json --limit 1
       - name: docker-build
         run: |
           docker compose build
-          docker build -t job-scraper-combined -f Dockerfile .
+          docker build -t jobsieve-combined -f Dockerfile .
       - name: scraper-health
         shell: bash
         run: |
@@ -116,6 +161,26 @@ jobs:
             echo "expected a job scored 1, got: $jobs"
             exit 1
           fi
+      - name: scraper-feed-sources
+        shell: bash
+        run: |
+          curl -fsS -X POST http://localhost:8000/run \
+            -H "Content-Type: application/json" \
+            -d '{"provider":"groq","lite_mode":true,"sources":["remoteok","remotive","arbeitnow"],"keywords":["python"],"cv_text":""}'
+          status=""
+          for i in {1..30}; do
+            status=$(curl -fsS http://localhost:8000/status)
+            if echo "$status" | grep -q '"message":"complete"' && echo "$status" | grep -q '"added":6'; then
+              break
+            fi
+            sleep 1
+          done
+          echo "final status: $status"
+          if ! echo "$status" | grep -q '"added":6'; then
+            echo "expected added:6, got: $status"
+            docker compose logs scraper || true
+            exit 1
+          fi
       - name: ui-health
         shell: bash
         run: |
@@ -135,7 +200,7 @@ jobs:
           docker run -d --name combined \
             -e MOCK_SEARCH=true \
             -p 18000:8000 -p 18501:8501 \
-            job-scraper-combined
+            jobsieve-combined
           ok=1
           for i in {1..40}; do
             if curl -fsS http://localhost:18000/health >/dev/null 2>&1 \
@@ -154,12 +219,12 @@ jobs:
           docker compose down -v
 
   publish-to-pypi:
-    needs: build-and-check
+    needs: [core, extension, build-and-check]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     environment:
       name: pypi
-      url: https://pypi.org/p/job-scraper02
+      url: https://pypi.org/p/jobsieve
     permissions:
       id-token: write
     steps:
@@ -171,6 +236,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install build
+      - name: tag-matches-version
+        run: |
+          python - <<'PY'
+          import os, tomllib
+          version = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          assert tag == version, f"tag {tag} does not match pyproject version {version}; nothing published"
+          PY
       - name: build-package
         run: python -m build
       - name: publish-to-pypi

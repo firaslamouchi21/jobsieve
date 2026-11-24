@@ -34,8 +34,10 @@ config/*.txt
 !config/keywords.txt.example
 !config/cv.txt.example
 .claude/
+private/
 .DS_Store
 Thumbs.db
 *.swp
 *.swo
 *~
+demo-data/
