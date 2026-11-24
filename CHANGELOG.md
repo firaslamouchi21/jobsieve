@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.1 (not yet released)
+## 2.0.1 (2026-11-24)
 
 ### Fixed
 
